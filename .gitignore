@@ -1,6 +1,7 @@
 tests.ipynb
-.vscode/
 __pycache__/
 secrets/
 scrips/
 tests/
+backtests/tests.ipynb
+backtests/Results

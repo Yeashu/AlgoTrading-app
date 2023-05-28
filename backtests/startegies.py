@@ -178,21 +178,22 @@ class Bhramastra(Strategy):
 
         # Calculate order signal
         data['ordersignal'] = 0
+        sIndex = data.columns.get_loc('ordersignal') 
         if Version1:
             for i in range(len(data)):
             #conditions of stratedgy
                 if crossover(data['MACDF'][:i],data['MACDS'][:i]) and data['Close'][i]<data['VWAP'][i] and data['Trend'][i] == 1:
-                    data.ordersignal[i] = 1
+                    data.iloc[i,sIndex] = 1
                 elif crossover(data['MACDS'][:i],data['MACDF'][:i]) and data['Close'][i]>data['VWAP'][i] and data['Trend'][i] == -1:
-                    data.ordersignal[i] = 2
+                    data.iloc[i,sIndex] = 2
         else:
             for i in range(1, len(data)):
                 if data['Trend'].iloc[i] == 1:
                     if data['MACDF'].iloc[i] > data['MACDS'].iloc[i] and data['Close'].iloc[i] > data['VWAP'].iloc[i]:
-                        data['ordersignal'].iloc[i] = 1  # Buy signal
+                        data.iloc[i,sIndex] = 1  # Buy signal
                 elif data['Trend'].iloc[i] == -1:
                     if data['MACDF'].iloc[i] < data['MACDS'].iloc[i] and data['Close'].iloc[i] < data['VWAP'].iloc[i]:
-                        data['ordersignal'].iloc[i] = 2
+                        data.iloc[i,sIndex] = 2
 
         return data
 
