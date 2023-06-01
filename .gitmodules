@@ -1,0 +1,3 @@
+[submodule "nifty_data_download"]
+	path = nifty_data_download
+	url = ./nifty_data_download
