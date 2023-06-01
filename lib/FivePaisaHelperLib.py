@@ -1,4 +1,5 @@
 import datetime
+import threading
 import time
 import pandas as pd
 from py5paisa import FivePaisaClient
@@ -38,7 +39,7 @@ class FivePaisaWrapper:
         download_intraday_data(self, symbols, interval, start, end, Exch='N', ExchangeSegment='C'):
             Downloads intraday data for multiple symbols from the 5paisa API in batches of 5 months.
     """
-
+    apiRate = 500
     calls_per_minute = 0
 
     def __init__(self, APP_NAME: str, APP_SOURCE: int, USER_ID: str, PASSWORD: str, USER_KEY: str, ENCRYPTION_KEY: str,
@@ -127,90 +128,169 @@ class FivePaisaWrapper:
         return self.client.historical_data(Exch=Exch, ExchangeSegment=ExchangeSegment, ScripCode=ScripCode,
                                            time=interval, From=start, To=end)
 
-    def download(self, symbols, interval, start, end, Exch='N', ExchangeSegment='C',verbose=True):
+    def download(self, symbols: list, interval, start, end, Exch='N', ExchangeSegment='C', resetRate: bool = True, verbose: bool = True):
         """
-        Downloads historical data for multiple symbols from the 5paisa API.
-
+        Downloads data for the given symbols and time range from the specified exchange uses multithreading.
+        
         Args:
-            symbols (list): A list of symbols for which to download historical data.
-            interval (str): The time interval for the historical data.
-            start (str): The start date for the historical data.
-            end (str): The end date for the historical data.
-            Exch (str, optional): The exchange of the symbols. Defaults to 'N'.
-            ExchangeSegment (str, optional): The exchange segment of the symbols. Defaults to 'C'.
-            verbose (bool, optional): If true prints the tasks currently performing. Defaults to True
-
+            symbols (list): List of symbols to download data for.
+            interval: Interval of data (e.g., '1min', '5min', 'day').
+            start: Start date of the data in the format 'YYYY-MM-DD'.
+            end: End date of the data in the format 'YYYY-MM-DD'.
+            Exch (str, optional): Exchange code. Default is 'N'.
+            ExchangeSegment (str, optional): Exchange segment code. Default is 'C'.
+            resetRate (bool, optional): Whether to reset the API call rate counter. Default is True.
+            verbose (bool, optional): Whether to print progress information. Default is True.
+        
         Returns:
-            dict: A Dictionary of downloaded historical data using symbols as keys and DataFrames as values.
+            dict: A dictionary containing the downloaded data for each symbol.
         """
+        
+        if resetRate:
+            self.calls_per_minute = 0
         downloadedDataFrames = {}
-        for symbol in symbols:
+        lock = threading.Lock()  # we are not locking for data as each worker function modifies a unique key of the dict
+    
+        def download_data(symbol):
+            nonlocal downloadedDataFrames
+    
             # Implement API call limit
-            if self.calls_per_minute >= 50:
+            if self.calls_per_minute >= self.apiRate:
                 time.sleep(60)  # Pause for 60 seconds (1 minute)
                 self.calls_per_minute = 0
-            
+    
             if verbose:
                 print(f'Downloading {symbol} data')
-
+    
             scrip = self.symbol2scrip[symbol]
-            downloadedDataFrames[symbol] = self.scrip_download(Exch=Exch, ExchangeSegment=ExchangeSegment,
-                                                               ScripCode=scrip, interval=interval,
-                                                               start=start, end=end).set_index('Datetime',inplace=True)
-            self.calls_per_minute += 1
+            data = self.scrip_download(Exch=Exch, ExchangeSegment=ExchangeSegment, ScripCode=scrip,
+                                       interval=interval, start=start, end=end)
+    
+            # Set date column as index
+            data.set_index('Datetime', inplace=True)
+    
+            # Not locking but can Acquire lock to update the shared downloadedDataFrames dictionary here 
+            downloadedDataFrames[symbol] = data
+    
+            lock.acquire()
+            try:
+                self.calls_per_minute += 1
+            finally:
+                lock.release()
+    
+        if verbose:
+            print(f'Downloading data for {len(symbols)} symbols')
+    
+        threads = []
+        for symbol in symbols:
+            # Spawn a thread to download data for each symbol
+            thread = threading.Thread(target=download_data, args=(symbol,))
+            thread.start()
+            threads.append(thread)
+    
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join()
+    
         return downloadedDataFrames
 
-    def download_intraday_data(self, symbols, interval, start: datetime.datetime, end: datetime.datetime, Exch='N', ExchangeSegment='C',verbose=True):
+
+    def download_intraday_data(self, symbols: list, interval, start: datetime.datetime, end: datetime.datetime, Exch='N', ExchangeSegment='C', verbose: bool = True, resetRate: bool = True):
         """
-        Downloads intraday data for multiple symbols from the 5paisa API in batches of 5 months.
+        Downloads intraday data for the given symbols and time range from the specified exchange.
 
         Args:
-            symbols (list): A list of symbols for which to download intraday data.
-            interval (str): The time interval for the intraday data.
-            start (str): The start date for the intraday data.
-            end (str): The end date for the intraday data.
-            Exch (str, optional): The exchange of the symbols. Defaults to 'N'.
-            ExchangeSegment (str, optional): The exchange segment of the symbols. Defaults to 'C'.
-            verbose (bool, optional): If true prints the tasks currently performing. Defaults to True
+            symbols (list): List of symbols to download data for.
+            interval: Interval of data (e.g., '1min', '5min', 'day').
+            start (datetime.datetime): Start date and time of the data.
+            end (datetime.datetime): End date and time of the data.
+            Exch (str, optional): Exchange code. Default is 'N'.
+            ExchangeSegment (str, optional): Exchange segment code. Default is 'C'.
+            verbose (bool, optional): Whether to print progress information. Default is True.
+            resetRate (bool, optional): Whether to reset the API call rate counter. Default is True.
 
         Returns:
-            dict: A Dictionary of downloaded intraday historical data using symbols as keys and DataFrames as values.
+            dict: A dictionary containing the downloaded intraday data for each symbol.
         """
+        if resetRate:
+            self.calls_per_minute = 0
         downloadedDataFrames = {}
+        lock = threading.Lock()  # Lock to synchronize access to downloadedDataFrames
+
+        def download_data(symbol, current_start, current_end):
+            """
+            Downloads intraday data for a symbol within a given time range.
+
+            Args:
+                symbol (str): The symbol for which to download data.
+                current_start (datetime.datetime): The start date and time of the current batch.
+                current_end (datetime.datetime): The end date and time of the current batch.
+            """
+            nonlocal downloadedDataFrames
+            nonlocal lock
+
+            # Implement API call limit
+            if self.calls_per_minute >= self.apiRate:
+                if verbose:
+                    print('API limit reached. Waiting for 60 seconds...')
+                time.sleep(60)  # Pause for 60 seconds (1 minute)
+                self.calls_per_minute = 0
+
+            # Download historical data for the current batch
+            scrip = self.symbol2scrip[symbol]
+            data = self.scrip_download(Exch=Exch, ExchangeSegment=ExchangeSegment, ScripCode=scrip,
+                                       interval=interval, start=current_start.strftime("%Y-%m-%d"),
+                                       end=current_end.strftime("%Y-%m-%d"))
+            self.calls_per_minute += 1
+
+            # Set date column as index
+            data.set_index('Datetime', inplace=True)
+            data.index = pd.to_datetime(data.index)
+
+            # Store the downloaded data in a local dictionary
+            local_dict = {symbol: data}
+
+            # Acquire lock to update the shared downloadedDataFrames dictionary
+            lock.acquire()
+            try:
+                for key, value in local_dict.items():
+                    if key not in downloadedDataFrames:
+                        downloadedDataFrames[key] = value
+                    else:
+                        # Concatenate the data if the symbol already exists in the dictionary
+                        downloadedDataFrames[key] = pd.concat([downloadedDataFrames[key], value])
+            finally:
+                lock.release()
+
+        if verbose:
+            print(f'Downloading data for {len(symbols)} symbols')
+
+        threads = []
         for symbol in symbols:
             # Split the date range into batches of 5 months
             current_start = start
             if verbose:
                 print(f'Downloading {symbol} data')
-            while current_start < end:
-                # Implement API call limit
-                if self.calls_per_minute >= 50:
-                    if verbose:
-                        print('Api limit reached waiting for 60sec')
-                    time.sleep(60)  # Pause for 60 seconds (1 minute)
-                    self.calls_per_minute = 0
 
+            while current_start < end:
                 current_end = current_start + datetime.timedelta(days=175)
                 if current_end > end:
                     current_end = end
 
-                # Download historical data for the current batch
-                scrip = self.symbol2scrip[symbol]
-                data = self.scrip_download(Exch=Exch, ExchangeSegment=ExchangeSegment, ScripCode=scrip,
-                                           interval=interval, start=current_start.strftime("%Y-%m-%d"),
-                                           end=current_end.strftime("%Y-%m-%d"))
-                self.calls_per_minute += 1
-
-                #set date column as index
-                data.set_index('Datetime',inplace=True)
-                # Store the downloaded data
-                if symbol not in downloadedDataFrames:
-                    downloadedDataFrames[symbol] = data
-                else:
-                    # Concatenate the data if the symbol already exists in the dictionary
-                    downloadedDataFrames[symbol] = pd.concat([downloadedDataFrames[symbol], data])
+                # Spawn a thread to download data for the current batch
+                thread = threading.Thread(target=download_data, args=(symbol, current_start, current_end))
+                thread.start()
+                threads.append(thread)
 
                 # Increment the current_start for the next batch
                 current_start = current_end + datetime.timedelta(days=1)
+
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join()
+
+        # Sort the downloaded data by index (Datetime)
+        for symbol, df in downloadedDataFrames.items():
+            downloadedDataFrames[symbol] = df.sort_index()
 
         return downloadedDataFrames

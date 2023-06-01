@@ -2,7 +2,8 @@
     "python.analysis.extraPaths": [
         "./backtests",
         "./nifty data download",
-        "./lib"
+        "./lib",
+        "./nifty_data_download"
     ]
     
 }
