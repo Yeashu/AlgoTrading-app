@@ -1,6 +1,6 @@
 tests.ipynb
 __pycache__/
-secrets/
+ApiKeys
 scrips/
 tests/
 backtests/tests.ipynb
