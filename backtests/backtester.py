@@ -1,15 +1,28 @@
 from backtesting import Backtest,Strategy
 from A_utils import save_dict_to_csv, save_to_csv
 from stocksList import nifty50_stocks
-from startegies import RTBollingerBands,Bhramastra
+from startegies import RTBollingerBands,Bhramastra,BhramastraRS
 import pandas as pd
 import os
 from multiprocessing import Process, Manager
+import warnings
+
+# Ignore all warnings
+warnings.filterwarnings("ignore")
+
+#filter and ignore specific warning categories
+#warnings.filterwarnings("ignore", category=DeprecationWarning)
+#warnings.filterwarnings("ignore", category=RuntimeWarning)
+
+
+#global 
+strat = {'Bhramastra':Bhramastra,'RTBollingerBands': RTBollingerBands,
+         'BhramastraRS':BhramastraRS}
 
 def mBacktest(strategy: Strategy, stocks: list, dataDirectory, cash, intraday: bool,
               leverage: float, save: bool, commission: float, savePlots:bool,
-              openPlots:bool,saveDirectory: str = 'BacktestResult',
-              verbose: bool = True):
+              openPlots:bool,oldStyle:bool,saveDirectory: str = 'BacktestResult',
+              verbose: bool = True,):
     """
     Run backtests for multiple stocks using multiprocessing.
     
@@ -57,16 +70,18 @@ def mBacktest(strategy: Strategy, stocks: list, dataDirectory, cash, intraday: b
 
         data = pd.read_csv(dataDirectory + '/' + symbol + '.csv', index_col=indexCol)
         data.index = pd.DatetimeIndex(data.index)
-        data = strategy.addSignals(data)
+        if oldStyle:
+            data = strategy.addSignals(data)
         bt = Backtest(data=data, strategy=strategy, cash=cash, margin=leverage, commission=commission)
         stat = bt.run()
-        if savePlots:
-            bt.plot(filename=f'{saveDirectory}/Plots/{symbol}.html',plot_drawdown=True,plot_return=True,plot_pl=True,open_browser=openPlots)
         ret = stat['Return [%]']
         resultDict[symbol] = (stat, ret)
 
         if verbose:
             print(f'Backtest completed for {strategy} for {symbol}, \n Return {ret}')
+        if savePlots:
+            print(f'Saving plots for {symbol}')
+            bt.plot(filename=f'{saveDirectory}/Plots/{symbol}.html',plot_drawdown=True,plot_return=True,plot_pl=True,open_browser=openPlots)
 
     if verbose:
         print(f'Running backtests for {len(stocks)} stocks')
@@ -76,7 +91,8 @@ def mBacktest(strategy: Strategy, stocks: list, dataDirectory, cash, intraday: b
 
         processes = []
         for symbol in stocks:
-            process = Process(target=run_backtest, args=(strategy, cash, leverage, commission, symbol, indexCol, resultDict,savePlots,openPlots,verbose,saveDirectory))
+            process = Process(target=run_backtest, args=(strategy, cash, leverage, commission, symbol, indexCol,
+                                                        resultDict,savePlots,openPlots,verbose,saveDirectory))
             process.start()
             processes.append(process)
 
@@ -94,6 +110,14 @@ def mBacktest(strategy: Strategy, stocks: list, dataDirectory, cash, intraday: b
         return
 
     return btResults, btReturns
+
+def mOptimize(bt:Backtest,maximize='SQN', method='grid', max_tries=None, constraint=None, return_heatmap=False, return_optimization=False, random_state=None, **kwargs):
+    '''write function that optmizes the strategy on a parameter using backtesting.py
+        TODO make it work as intended'''
+    bt.optimize(maximize=maximize,method=method,max_tries=max_tries,
+                constraint=constraint,return_heatmap=return_heatmap,
+                return_optimization=return_optimization,random_state=random_state)
+    pass
 
 
 def Save(btResults:dict,btReturns:dict,saveDirectory):
@@ -122,7 +146,7 @@ def createDirIfNotExists(directory):
 def main(stratagies:list,stocks:list,dataDirectory:dict,saveDirectories:dict,
          cash,save:bool=False,leverage:float = 1,intraday:bool = False,
          CalcUnleveragedAlso:bool = False,commission:float=0,
-         savePlots:bool = False,openPlots:bool = False):
+         savePlots:bool = False,openPlots:bool = False, oldStyle:bool = True):
     '''
     This function runs backtest for all the startegies
     Args:
@@ -137,9 +161,7 @@ def main(stratagies:list,stocks:list,dataDirectory:dict,saveDirectories:dict,
     Returns:
         None
     '''
-    
 
-    strat = {'Bhramastra':Bhramastra,'RTBollingerBands': RTBollingerBands}
     for st in stratagies:
         saveDirectories[st] = saveDirectories[st] + '/' + st
         strategy = strat[st]
@@ -150,23 +172,26 @@ def main(stratagies:list,stocks:list,dataDirectory:dict,saveDirectories:dict,
         if CalcUnleveragedAlso:
             mBacktest(strategy,stocks,dataDirectory[st],cash,intraday=intraday,
                       leverage=1,save=save,saveDirectory=saveDirectories[st],
-                      commission=commission,savePlots=savePlots,openPlots=openPlots)
+                      commission=commission,savePlots=savePlots,openPlots=openPlots
+                      ,oldStyle=oldStyle)
         if leverage != 1:
             saveDirectories[st] = saveDirectories[st] + '/leveraged'
             mBacktest(strategy,stocks,dataDirectory[st],cash,intraday=intraday,
                   leverage=leverage,save=save,saveDirectory=saveDirectories[st]
-                  ,commission=commission,savePlots=savePlots,openPlots=openPlots)
+                  ,commission=commission,savePlots=savePlots,openPlots=openPlots
+                  ,oldStyle=oldStyle)
         
     
 
 
 if __name__ == '__main__':
-    Strategies=['Bhramastra','RTBollingerBands']
-    dataDirectories=['/home/yeashu/project/AlgoTrading app/nifty_data_download/Data/Equities_csv/intraday']
+    Strategies=['BhramastraRS']
+    oldStyle = False
+    dataDirectories=['/home/yeashu/project/AlgoTrading app/nifty_data_download/Data/Equities_csv/daily/nifty50']
     ResultDirectories=['/home/yeashu/project/AlgoTrading app/backtests/Results']
     stocks=nifty50_stocks
-    leverage=1/5
-    intraday=True
+    leverage=1
+    intraday=False
     CalcUnleveragedAlso=True
     save=True
     savePlots=True
@@ -177,4 +202,4 @@ if __name__ == '__main__':
          saveDirectories={i:ResultDirectories[0] for i in Strategies},#modify it to save to diff directories
          cash=cash,save=save,leverage=leverage,intraday=intraday,
          CalcUnleveragedAlso=CalcUnleveragedAlso,commission=commission,
-         savePlots=savePlots,openPlots=openPlots)
+         savePlots=savePlots,openPlots=openPlots,oldStyle=oldStyle)
