@@ -7,8 +7,9 @@ import os
 from multiprocessing import Process, Manager
 
 def mBacktest(strategy: Strategy, stocks: list, dataDirectory, cash, intraday: bool,
-              leverage: float, save: bool, commission: float,
-              saveDirectory: str = 'BacktestResult', verbose: bool = True):
+              leverage: float, save: bool, commission: float, savePlots:bool,
+              openPlots:bool,saveDirectory: str = 'BacktestResult',
+              verbose: bool = True):
     """
     Run backtests for multiple stocks using multiprocessing.
     
@@ -27,12 +28,17 @@ def mBacktest(strategy: Strategy, stocks: list, dataDirectory, cash, intraday: b
     Returns:
         tuple: A tuple containing the backtest results and returns.
     """
-
+    if save:
+        createDirIfNotExists(saveDirectory)
+    if savePlots:
+        createDirIfNotExists(f'{saveDirectory}/Plots/')
     btResults = {}
     btReturns = {}
     indexCol = 'Datetime' if intraday else 'Date'
 
-    def run_backtest(strategy: Strategy, cash, leverage, commission: float, symbol: str, indexCol: str, resultDict, verbose: bool = True):
+    def run_backtest(strategy: Strategy, cash, leverage, commission: float,
+                    symbol: str, indexCol: str, resultDict, savePlots:bool,
+                    openPlots:bool,verbose: bool = True,saveDirectory:str = ''):
         """
         Run backtest for a single stock.
         
@@ -54,6 +60,8 @@ def mBacktest(strategy: Strategy, stocks: list, dataDirectory, cash, intraday: b
         data = strategy.addSignals(data)
         bt = Backtest(data=data, strategy=strategy, cash=cash, margin=leverage, commission=commission)
         stat = bt.run()
+        if savePlots:
+            bt.plot(filename=f'{saveDirectory}/Plots/{symbol}.html',plot_drawdown=True,plot_return=True,plot_pl=True,open_browser=openPlots)
         ret = stat['Return [%]']
         resultDict[symbol] = (stat, ret)
 
@@ -68,7 +76,7 @@ def mBacktest(strategy: Strategy, stocks: list, dataDirectory, cash, intraday: b
 
         processes = []
         for symbol in stocks:
-            process = Process(target=run_backtest, args=(strategy, cash, leverage, commission, symbol, indexCol, resultDict))
+            process = Process(target=run_backtest, args=(strategy, cash, leverage, commission, symbol, indexCol, resultDict,savePlots,openPlots,verbose,saveDirectory))
             process.start()
             processes.append(process)
 
@@ -81,12 +89,6 @@ def mBacktest(strategy: Strategy, stocks: list, dataDirectory, cash, intraday: b
 
 
     if save:
-        # Check if the directory exists in the file system, if not create one
-        if not os.path.exists(saveDirectory):
-            print('Directory does not exist')
-            os.makedirs(saveDirectory)
-            print(f'Directory {saveDirectory} created')
-
         print(f'Saving results of Backtest of {strategy} at {saveDirectory}')
         Save(btResults=btResults, btReturns=btReturns, saveDirectory=saveDirectory)
         return
@@ -108,11 +110,19 @@ def Save(btResults:dict,btReturns:dict,saveDirectory):
     for symbol,stat in btResults.items():
         save_to_csv(stat,symbol,saveDirectory)
 
+def createDirIfNotExists(directory):
+    # Check if the directory exists in the file system, if not create one
+    if not os.path.exists(directory):
+        print('Directory does not exist')
+        os.makedirs(directory)
+        print(f'Directory {directory} created')
+
 
 #backtesting startegies
 def main(stratagies:list,stocks:list,dataDirectory:dict,saveDirectories:dict,
          cash,save:bool=False,leverage:float = 1,intraday:bool = False,
-         CalcUnleveragedAlso:bool = False,commission:float=0,):
+         CalcUnleveragedAlso:bool = False,commission:float=0,
+         savePlots:bool = False,openPlots:bool = False):
     '''
     This function runs backtest for all the startegies
     Args:
@@ -140,28 +150,31 @@ def main(stratagies:list,stocks:list,dataDirectory:dict,saveDirectories:dict,
         if CalcUnleveragedAlso:
             mBacktest(strategy,stocks,dataDirectory[st],cash,intraday=intraday,
                       leverage=1,save=save,saveDirectory=saveDirectories[st],
-                      commission=commission)
+                      commission=commission,savePlots=savePlots,openPlots=openPlots)
         if leverage != 1:
             saveDirectories[st] = saveDirectories[st] + '/leveraged'
             mBacktest(strategy,stocks,dataDirectory[st],cash,intraday=intraday,
                   leverage=leverage,save=save,saveDirectory=saveDirectories[st]
-                  ,commission=commission)
+                  ,commission=commission,savePlots=savePlots,openPlots=openPlots)
         
     
 
 
 if __name__ == '__main__':
-    Strategies=['Bhramastra']
-    dataDirectories=['/home/yeashu/project/AlgoTrading app/nifty_data_download/Data/Equities_csv/daily/nifty50']
+    Strategies=['Bhramastra','RTBollingerBands']
+    dataDirectories=['/home/yeashu/project/AlgoTrading app/nifty_data_download/Data/Equities_csv/intraday']
     ResultDirectories=['/home/yeashu/project/AlgoTrading app/backtests/Results']
     stocks=nifty50_stocks
-    leverage=1
-    intraday=False
+    leverage=1/5
+    intraday=True
     CalcUnleveragedAlso=True
     save=True
+    savePlots=True
+    openPlots=False
     cash=100000
     commission=0
     main(stratagies=Strategies,stocks=stocks,dataDirectory={i:j for i,j in zip(Strategies,dataDirectories)},
-         saveDirectories={i:j for i,j in zip(Strategies,ResultDirectories)},
+         saveDirectories={i:ResultDirectories[0] for i in Strategies},#modify it to save to diff directories
          cash=cash,save=save,leverage=leverage,intraday=intraday,
-         CalcUnleveragedAlso=CalcUnleveragedAlso,commission=commission)
+         CalcUnleveragedAlso=CalcUnleveragedAlso,commission=commission,
+         savePlots=savePlots,openPlots=openPlots)
