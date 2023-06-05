@@ -88,7 +88,7 @@ class FivePaisaWrapper:
                 dictionary[key] = value
         self.symbol2scrip = dictionary
 
-    def login(self, totp: str):
+    def login(self, totp: int):
         """
         Logs in to the 5paisa API with the provided TOTP and PIN.
 
