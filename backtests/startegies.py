@@ -290,12 +290,14 @@ class BrahmastraR(Strategy):
 
 class BhramastraRS(Strategy):
 
+    plotIndicators:bool = None
+    V1:bool = None
     initsize = 0.99
 
     #def B_SIGNAL(self):
         #return self.data.ordersignal
 
-    def addSignals(self,data: DataFrame,Version1:bool = False):
+    def addSignals(self,data: DataFrame,plotIndicators:bool,Version1:bool = False):
         """
         Adds additional technical analysis signals to the given DataFrame.
 
@@ -327,18 +329,20 @@ class BhramastraRS(Strategy):
 
         # Calculate Supertrend
         supertrend = ta.supertrend(data.High, data.Low, data.Close, length=20, multiplier=2)
-        self.Trend = self.I(lambda :supertrend['SUPERTd_20_2.0'].values,name='Trend')
-        self.STValue = self.I(lambda :supertrend['SUPERT_20_2.0'].values,name='STValue')
+        self.Trend = self.I(lambda :supertrend['SUPERTd_20_2.0'].values,name='Trend',plot=plotIndicators)
+        self.STValue = self.I(lambda :supertrend['SUPERT_20_2.0'].values,name='STValue',plot=plotIndicators)
 
         # Calculate VWAP
         vwap = ta.vwap(data['High'], data['Low'], data.Close, data.Volume).values
-        self.vwap = self.I(lambda :vwap, name='VWAP')
+        self.vwap = self.I(lambda :vwap, name='VWAP',plot=plotIndicators)
 
         # Calculate MACD
         macd = ta.macd(data.Close, 12, 26, 9)
-        self.MACDF = self.I(lambda :macd['MACD_12_26_9'].values,name='MACDF')
+        self.MACDF = self.I(lambda :macd['MACD_12_26_9'].values,name='MACDF',plot=plotIndicators)
         #data['MACDh'] = macd['MACDh_12_26_9'] dont need histogram
-        self.MACDS = self.I(lambda :macd['MACDs_12_26_9'].values,name='MACDS')
+        self.MACDS = self.I(lambda :macd['MACDs_12_26_9'].values,name='MACDS',plot=plotIndicators)
+
+        #self.adx = self.I(lambda :ta.adx(data['High'],data['Low'],data['Close'],length=14)['ADX_14'], name='adx',plot=plotIndicators)
 
         # Calculate order signal
         ordersignal = np.zeros(len(data))
@@ -370,7 +374,7 @@ class BhramastraRS(Strategy):
             'Volume': self.data.Volume
         }
         df = DataFrame(data=data_dict,index=self.data.index)
-        self.addSignals(df)
+        self.addSignals(df,plotIndicators=self.plotIndicators,Version1=self.V1)
         #self.signal = self.I(self.B_SIGNAL)
 
     def next(self):
@@ -378,6 +382,7 @@ class BhramastraRS(Strategy):
 
         # Check if there are no open trades
         if len(self.trades) == 0:
+           # if self.adx[-1]>25:
             # Buy if a buy (1) signal is generated
             if self.ordersignal[-1] == 1:
                 self.buy(size=self.initsize)
