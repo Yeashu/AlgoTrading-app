@@ -1,0 +1,6 @@
+backtesting
+pandas_ta
+py5paisa
+yfinance
+pandas
+numpy

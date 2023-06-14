@@ -1,0 +1,13 @@
+name: AlgoTrading
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python
+  - numpy
+  - pandas
+  - pip:
+    - backtesting
+    - pandas_ta
+    - py5paisa
+    - yfinance
