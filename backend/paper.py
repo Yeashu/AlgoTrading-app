@@ -5,8 +5,10 @@ class PaperTradingBroker(Broker):
     def __init__(self):
         self.account_balance = 100000.0  # Initial account balance for paper trading
         self.portfolio = {}  # Empty portfolio for paper trading
+        self.orderBook = {}
+        self.currentOrderId = 0
 
-    def buy_stock(self, symbol: str, quantity: int, stop_loss: float = None) -> bool:
+    def buy_stock(self, symbol: str, quantity: int, stop_loss: float = None) -> int:
         # Simulate buying a stock in paper trading
         stock_price = self.get_stock_price(symbol)
         total_cost = stock_price * quantity

@@ -39,11 +39,21 @@ class FivePaisaWrapper:
         download_intraday_data(self, symbols, interval, start, end, Exch='N', ExchangeSegment='C'):
             Downloads intraday data for multiple symbols from the 5paisa API in batches of 5 months.
     """
+
     apiRate = 500
     calls_per_minute = 0
 
-    def __init__(self, APP_NAME: str, APP_SOURCE: int, USER_ID: str, PASSWORD: str, USER_KEY: str, ENCRYPTION_KEY: str,
-                 client_code: int, pin: int):
+    def __init__(
+        self,
+        APP_NAME: str,
+        APP_SOURCE: int,
+        USER_ID: str,
+        PASSWORD: str,
+        USER_KEY: str,
+        ENCRYPTION_KEY: str,
+        client_code: int,
+        pin: int,
+    ):
         """
         Initializes the FivePaisaWrapper object with the provided credentials and client information.
 
@@ -64,7 +74,7 @@ class FivePaisaWrapper:
             "USER_ID": USER_ID,
             "PASSWORD": PASSWORD,
             "USER_KEY": USER_KEY,
-            "ENCRYPTION_KEY": ENCRYPTION_KEY
+            "ENCRYPTION_KEY": ENCRYPTION_KEY,
         }
         self.client = FivePaisaClient(cred=self.cred)
         self.client_code = client_code
@@ -80,7 +90,7 @@ class FivePaisaWrapper:
         """
         # Load the dictionary from the CSV file
         dictionary = {}
-        with open(filepath, 'r') as csvfile:
+        with open(filepath, "r") as csvfile:
             csv_reader = reader(csvfile)
             for row in csv_reader:
                 key = row[0]
@@ -95,7 +105,9 @@ class FivePaisaWrapper:
         Args:
             totp (int): The TOTP (Time-based One-Time Password) for authentication.
         """
-        self.client.get_totp_session(client_code=self.client_code, totp=totp, pin=self.pin)
+        self.client.get_totp_session(
+            client_code=self.client_code, totp=totp, pin=self.pin
+        )
 
     def logged_in(self):
         """
@@ -125,13 +137,29 @@ class FivePaisaWrapper:
             pandas.DataFrame: The downloaded historical data as a DataFrame.
         """
 
-        return self.client.historical_data(Exch=Exch, ExchangeSegment=ExchangeSegment, ScripCode=ScripCode,
-                                           time=interval, From=start, To=end)
+        return self.client.historical_data(
+            Exch=Exch,
+            ExchangeSegment=ExchangeSegment,
+            ScripCode=ScripCode,
+            time=interval,
+            From=start,
+            To=end,
+        )
 
-    def download(self, symbols: list, interval, start, end, Exch='N', ExchangeSegment='C', resetRate: bool = True, verbose: bool = True):
+    def download(
+        self,
+        symbols: list,
+        interval,
+        start,
+        end,
+        Exch="N",
+        ExchangeSegment="C",
+        resetRate: bool = True,
+        verbose: bool = True,
+    ):
         """
         Downloads data for the given symbols and time range from the specified exchange uses multithreading.
-        
+
         Args:
             symbols (list): List of symbols to download data for.
             interval: Interval of data (e.g., '1min', '5min', 'day').
@@ -141,61 +169,78 @@ class FivePaisaWrapper:
             ExchangeSegment (str, optional): Exchange segment code. Default is 'C'.
             resetRate (bool, optional): Whether to reset the API call rate counter. Default is True.
             verbose (bool, optional): Whether to print progress information. Default is True.
-        
+
         Returns:
             dict: A dictionary containing the downloaded data for each symbol.
         """
-        
+
         if resetRate:
             self.calls_per_minute = 0
         downloadedDataFrames = {}
-        lock = threading.Lock()  # we are not locking for data as each worker function modifies a unique key of the dict
-    
+        lock = (
+            threading.Lock()
+        )  # we are not locking for data as each worker function modifies a unique key of the dict
+
         def download_data(symbol):
             nonlocal downloadedDataFrames
-    
+
             # Implement API call limit
             if self.calls_per_minute >= self.apiRate:
                 time.sleep(60)  # Pause for 60 seconds (1 minute)
                 self.calls_per_minute = 0
-    
+
             if verbose:
-                print(f'Downloading {symbol} data')
-    
+                print(f"Downloading {symbol} data")
+
             scrip = self.symbol2scrip[symbol]
-            data = self.scrip_download(Exch=Exch, ExchangeSegment=ExchangeSegment, ScripCode=scrip,
-                                       interval=interval, start=start, end=end)
-    
+            data = self.scrip_download(
+                Exch=Exch,
+                ExchangeSegment=ExchangeSegment,
+                ScripCode=scrip,
+                interval=interval,
+                start=start,
+                end=end,
+            )
+
             # Set date column as index
-            data.set_index('Datetime', inplace=True)
-    
-            # Not locking but can Acquire lock to update the shared downloadedDataFrames dictionary here 
+            data.set_index("Datetime", inplace=True)
+
+            # Not locking but can Acquire lock to update the shared downloadedDataFrames dictionary here
             downloadedDataFrames[symbol] = data
-    
+
             lock.acquire()
             try:
                 self.calls_per_minute += 1
             finally:
                 lock.release()
-    
+
         if verbose:
-            print(f'Downloading data for {len(symbols)} symbols')
-    
+            print(f"Downloading data for {len(symbols)} symbols")
+
         threads = []
         for symbol in symbols:
             # Spawn a thread to download data for each symbol
             thread = threading.Thread(target=download_data, args=(symbol,))
             thread.start()
             threads.append(thread)
-    
+
         # Wait for all threads to complete
         for thread in threads:
             thread.join()
-    
+
         return downloadedDataFrames
 
-
-    def download_intraday_data(self, symbols: list, interval, start: datetime.datetime, end: datetime.datetime, Exch='N', ExchangeSegment='C', verbose: bool = True, resetRate: bool = True):
+    def download_intraday_data(
+        self,
+        symbols: list,
+        interval,
+        start: datetime.datetime,
+        end: datetime.datetime,
+        Exch="N",
+        ExchangeSegment="C",
+        verbose: bool = True,
+        resetRate: bool = True,
+    ):
         """
         Downloads intraday data for the given symbols and time range from the specified exchange.
 
@@ -232,19 +277,24 @@ class FivePaisaWrapper:
             # Implement API call limit
             if self.calls_per_minute >= self.apiRate:
                 if verbose:
-                    print('API limit reached. Waiting for 60 seconds...')
+                    print("API limit reached. Waiting for 60 seconds...")
                 time.sleep(60)  # Pause for 60 seconds (1 minute)
                 self.calls_per_minute = 0
 
             # Download historical data for the current batch
             scrip = self.symbol2scrip[symbol]
-            data = self.scrip_download(Exch=Exch, ExchangeSegment=ExchangeSegment, ScripCode=scrip,
-                                       interval=interval, start=current_start.strftime("%Y-%m-%d"),
-                                       end=current_end.strftime("%Y-%m-%d"))
+            data = self.scrip_download(
+                Exch=Exch,
+                ExchangeSegment=ExchangeSegment,
+                ScripCode=scrip,
+                interval=interval,
+                start=current_start.strftime("%Y-%m-%d"),
+                end=current_end.strftime("%Y-%m-%d"),
+            )
             self.calls_per_minute += 1
 
             # Set date column as index
-            data.set_index('Datetime', inplace=True)
+            data.set_index("Datetime", inplace=True)
             data.index = pd.to_datetime(data.index)
 
             # Store the downloaded data in a local dictionary
@@ -258,19 +308,21 @@ class FivePaisaWrapper:
                         downloadedDataFrames[key] = value
                     else:
                         # Concatenate the data if the symbol already exists in the dictionary
-                        downloadedDataFrames[key] = pd.concat([downloadedDataFrames[key], value])
+                        downloadedDataFrames[key] = pd.concat(
+                            [downloadedDataFrames[key], value]
+                        )
             finally:
                 lock.release()
 
         if verbose:
-            print(f'Downloading data for {len(symbols)} symbols')
+            print(f"Downloading data for {len(symbols)} symbols")
 
         threads = []
         for symbol in symbols:
             # Split the date range into batches of 5 months
             current_start = start
             if verbose:
-                print(f'Downloading {symbol} data')
+                print(f"Downloading {symbol} data")
 
             while current_start < end:
                 current_end = current_start + datetime.timedelta(days=175)
@@ -278,7 +330,9 @@ class FivePaisaWrapper:
                     current_end = end
 
                 # Spawn a thread to download data for the current batch
-                thread = threading.Thread(target=download_data, args=(symbol, current_start, current_end))
+                thread = threading.Thread(
+                    target=download_data, args=(symbol, current_start, current_end)
+                )
                 thread.start()
                 threads.append(thread)
 
