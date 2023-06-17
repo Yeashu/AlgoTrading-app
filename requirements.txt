@@ -1,4 +1,4 @@
-backtesting
+vectorbt
 pandas_ta
 py5paisa
 yfinance
