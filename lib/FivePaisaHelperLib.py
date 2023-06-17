@@ -351,7 +351,7 @@ class FivePaisaWrapper:
 
         return downloadedDataFrames
     
-    def GetLiveData(self,symbols:list):
+    def get_live_data(self,symbols:list):
         req=[{"Exchange":"N","ExchangeType":"C","Symbol":symbol} for symbol in symbols]
         _data = self.client.fetch_market_feed(req)
         data = {}
@@ -361,3 +361,9 @@ class FivePaisaWrapper:
 
         return data
 
+    def get_current_price(self,symbols:list):
+        ldata = self.get_live_data(symbols=symbols)
+        lprice = {}
+        for symbol , data in ldata.items():
+            lprice[symbol] = data['LastTradeTime']
+        return lprice
