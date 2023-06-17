@@ -1,9 +1,13 @@
+import sys
+import os
+
+parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.append(parent_dir)
 from backtesting import Backtest,Strategy
-from A_utils import save_dict_to_csv, save_to_csv
+from lib.A_utils import save_dict_to_csv, save_to_csv
 from stocksList import nifty50_stocks
 from startegies import RTBollingerBands,Bhramastra,BhramastraRS
 import pandas as pd
-import os
 from multiprocessing import Process, Manager
 import warnings
 
