@@ -1,5 +1,6 @@
 import csv
-
+import datetime
+import re
 def save_dict_to_csv(data_dict, save_directory, filename):
     """
     Saves a dictionary to a CSV file with specified directory and filename.
@@ -42,4 +43,11 @@ def save_to_csv(df, symbol, filepath):
     except Exception as e:
         print(f"Error occurred while saving {symbol} data to a CSV file: {str(e)}")
 
-        
+def convert_date_string(date_string):
+    match = re.search(r"\/Date\((\d+)([+-]\d{4})\)", date_string)
+    if match:
+        timestamp = int(match.group(1))
+        dt = datetime.datetime.fromtimestamp(timestamp / 1000)
+        return dt
+    else:
+        raise ValueError("Invalid date string format") 

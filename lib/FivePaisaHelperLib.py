@@ -5,6 +5,8 @@ import pandas as pd
 from py5paisa import FivePaisaClient
 from csv import reader
 
+from A_utils import convert_date_string
+
 
 class FivePaisaWrapper:
     """
@@ -348,3 +350,14 @@ class FivePaisaWrapper:
             downloadedDataFrames[symbol] = df.sort_index()
 
         return downloadedDataFrames
+    
+    def GetLiveData(self,symbols:list):
+        req=[{"Exchange":"N","ExchangeType":"C","Symbol":symbol} for symbol in symbols]
+        _data = self.client.fetch_market_feed(req)
+        data = {}
+        for i,symbol in enumerate(symbols):
+            data[symbol] = _data['Data'][i]
+        data['Time'] = convert_date_string(_data['TimeStamp'])
+
+        return data
+
