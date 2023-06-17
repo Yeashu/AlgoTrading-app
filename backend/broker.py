@@ -48,3 +48,21 @@ class Broker(ABC):
     @abstractmethod
     def get_market_status(self) -> str:
         """Get the current market status (e.g., open, closed, pre-market, etc.)."""
+    
+    @abstractmethod
+    def get_account_summary(self) -> dict:
+        """Get the summary of the account."""
+
+    @abstractmethod
+    def get_open_orders(self) -> list:
+        """Get the list of open orders that have not been executed or canceled."""
+
+    @abstractmethod
+    def get_order_history(
+        self, start_date: str, end_date: str, symbol: str = None
+    ) -> list:
+        """Get the list of orders that have been executed or canceled in the past."""
+
+    @abstractmethod
+    def __str__(self) -> str:
+        """Return a string representation of the broker object."""
