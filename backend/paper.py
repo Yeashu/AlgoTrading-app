@@ -17,6 +17,7 @@ class PaperTradingBroker(Broker):
         self.name = 'Paper Trading'
         self.holdings = {} # The current portfolio holdings as a dictionary of symbol: quantity pairs
         self.orders = [] # The list of open orders as order objects
+        self.ExecutedOrders = [] # The list for executed order
         self.balance = 100000.0  # Initial account balance for paper trading
         #Using five paisa for live data
         self.DataFeed = FivePaisaWrapper(
@@ -68,7 +69,7 @@ class PaperTradingBroker(Broker):
                 "symbol": symbol,
                 "quantity": quantity,
                 "price": Limit,
-                "type": "limitBuy",
+                "type": "limit_buy",
                 "status": "open",
             }
         else:
@@ -98,7 +99,7 @@ class PaperTradingBroker(Broker):
                 "symbol": symbol,
                 "quantity": quantity,
                 "price": stop_loss,
-                "type": "slSell",
+                "type": "sl_sell",
                 "status": "open",
             }
             self.orders.append(order)
@@ -140,7 +141,7 @@ class PaperTradingBroker(Broker):
                 "symbol": symbol,
                 "quantity": quantity,
                 "price": Limit,
-                "type": "limitSell",
+                "type": "limit_sell",
                 "status": "open",
             }
         else:
@@ -166,7 +167,7 @@ class PaperTradingBroker(Broker):
                 "symbol": symbol,
                 "quantity": quantity,
                 "price": stop_loss,
-                "type": "slBuy",
+                "type": "sl_buy",
                 "status": "open",
             }
             self.orders.append(order)
@@ -234,7 +235,7 @@ class PaperTradingBroker(Broker):
                 "symbol": symbol,
                 "quantity": quantity,
                 "price": limit,
-                "type": "limit",
+                "type": "limit_"+order_type,
                 "status": "open",
             }
             print(f"Placed a Limit order for {quantity} shares of {symbol} at ${limit:.2f} per share")
@@ -263,7 +264,7 @@ class PaperTradingBroker(Broker):
                 "symbol": symbol,
                 "quantity": quantity,
                 "price": stop_loss,
-                "type": "slSell",
+                "type": "sl_sell",
                 "status": "open",
             }
             self.orders.append(stop_loss_order)
@@ -277,8 +278,21 @@ class PaperTradingBroker(Broker):
 
     def cancel_order(self, order_id: str) -> bool:
         # Cancel an order in paper trading
-        # Since it's paper trading, the order cancellation is always successful
-        return True
+        for order in self.orders:
+            if order_id == order['id']:
+                if 'sl' in order['type']:
+                    self.orders.remove(order)
+                    return True
+                elif 'buy' in order['type']:
+                    self.orders.remove(order)
+                    self.balance += order['quantity'] * order['price']
+                    return True
+                elif 'sell' in order['type']:
+                    self.orders.remove(order)
+                    self.holdings[order['symbol']] += order['quantity']
+                    return True
+        
+        return False
 
     def get_order_status(self, order_id: str) -> str:
         # Get the status of an order in paper trading
