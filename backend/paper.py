@@ -17,7 +17,7 @@ class PaperTradingBroker(Broker):
         self.name = 'Paper Trading'
         self.holdings = {} # The current portfolio holdings as a dictionary of symbol: quantity pairs
         self.orders = [] # The list of open orders as order objects
-        self.ExecutedOrders = [] # The list for executed order
+        self.executed_orders = [] # The list for executed order
         self.balance = 100000.0  # Initial account balance for paper trading
         #Using five paisa for live data
         self.DataFeed = FivePaisaWrapper(
@@ -296,9 +296,16 @@ class PaperTradingBroker(Broker):
 
     def get_order_status(self, order_id: str) -> str:
         # Get the status of an order in paper trading
-        # Since it's paper trading, we can assume that all orders are executed instantly
-        return "Filled"
-
+        for order in self.orders:
+            if order_id == order['id']:
+                return 'Open'
+        
+        for order in self.executed_orders:
+            if order_id == order['id']:
+                return 'Filled'
+        
+        return "Order with this order_id does not exists"
+            
     def get_available_assets(self) -> list:
         # Return a list of available tradable assets in paper trading
         # This can be based on a predefined list of assets or simulated data
@@ -306,5 +313,7 @@ class PaperTradingBroker(Broker):
 
     def get_market_status(self) -> str:
         # Return the current market status in paper trading
-        # This can be based on predefined market hours or simulated data
         return "Open"
+    
+    def __str__(self) -> str:
+        return f"Paper Trading Broker with balance: {self.balance} and holdings: {self.holdings}"
