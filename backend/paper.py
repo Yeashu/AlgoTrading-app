@@ -1,4 +1,5 @@
 import datetime
+import logging
 import uuid
 from broker import Broker
 from ApiKeys.secrets5p import (
@@ -13,14 +14,34 @@ from ApiKeys.secrets5p import (
 )
 from lib.FivePaisaHelperLib import FivePaisaWrapper
 
+
+# Set up logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+file_handler = logging.FileHandler("broker.log")
+file_handler.setLevel(logging.INFO)
+formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
+
+
 class PaperTradingBroker(Broker):
-    def __init__(self,balance: int,totp: str):
+    """Paper Trading Broker class for simulating trading operations in a paper trading environment."""
+
+    def __init__(self, balance: float, totp: str):
+        """
+        Initialize the PaperTradingBroker instance.
+
+        Args:
+            balance (float): The initial account balance for paper trading.
+            totp (str): The Time-Based One-Time Password (TOTP) for authentication.
+        """
+        # Initialize instance variables
         self.name = 'Paper Trading'
-        self.holdings = {} # The current portfolio holdings as a dictionary of symbol: quantity pairs
-        self.orders = [] # The list of open orders as order objects
-        self.executed_orders = [] # The list for executed order
-        self.balance = 100000.0  # Initial account balance for paper trading
-        #Using five paisa for live data
+        self.holdings = {}
+        self.orders = [] # list of open orders
+        self.executed_orders = []
+        self.balance = balance
         self.DataFeed = FivePaisaWrapper(
             APP_NAME=APP_NAME,
             APP_SOURCE=APP_SOURCE,
@@ -31,177 +52,188 @@ class PaperTradingBroker(Broker):
             client_code=client_code,
             pin=Pin,
         )
-        self.DataFeed.load_conv_dict(
-            "/home/yeashu/project/AlgoTrading app/scrips/symbols2Scip.csv"
-        )
+        self.DataFeed.load_conv_dict("/home/yeashu/project/AlgoTrading app/scrips/symbols2Scip.csv")
         self.DataFeed.login(totp)
 
-        
-    def buy_stock(self, symbol: str, quantity: int, stop_loss: float=None, Limit: float=None):
-        """Buy a specified quantity of a stock with an optional stop-loss price.
+    def buy_stock(self, symbol: str, quantity: int, stop_loss: float = None, limit: float = None):
+        """
+        Place a buy order for a specified quantity of a stock.
 
         Args:
             symbol (str): The symbol of the stock to buy.
             quantity (int): The number of shares to buy.
-            stop_loss (float): The price at which to sell the stock if it falls below this level.
+            stop_loss (float, optional): The price at which to sell the stock if it falls below this level.
+            limit (float, optional): The maximum price at which to execute the buy order.
 
         Returns:
-            bool: True if the order was placed successfully, False otherwise.
+            list: A list of order IDs if the order was placed successfully, an empty list otherwise.
         """
         # Get the current price of the stock
         price = self.get_stock_price(symbol)
-
-        # Check if the price is valid
         if price <= 0:
-            print(f"Invalid price for {symbol}")
-            return False
+            logger.error(f"Invalid price for {symbol}")
+            return []
 
-        # Check if the balance is sufficient
+        # Calculate the cost of the buy order
         cost = price * quantity
         if cost > self.balance:
-            print(f"Insufficient balance to buy {quantity} shares of {symbol}")
-            return False
+            logger.error(f"Insufficient balance to buy {quantity} shares of {symbol}")
+            return []
 
-        if Limit:
-            cost = quantity*Limit
-            # Create an order object with the details
+        if limit:
+            # Place a limit buy order
+            cost = quantity * limit
             order = {
-                "id": str(uuid.uuid4()), # Generate a unique id for the order
+                "id": str(uuid.uuid4()),
                 "symbol": symbol,
                 "quantity": quantity,
-                "price": Limit,
+                "price": limit,
                 "type": "limit_buy",
                 "status": "open",
             }
+            logger.info(f"Placed a Limit Buy order for {quantity} shares of {symbol} at ${limit:.2f} per share")
         else:
-            # Create an order object with the details
+            # Place a regular buy order
             order = {
-                "id": str(uuid.uuid4()), # Generate a unique id for the order
+                "id": str(uuid.uuid4()),
                 "symbol": symbol,
                 "quantity": quantity,
                 "price": price,
                 "type": "buy",
                 "status": "open",
             }
+            logger.info(f"Placed a Buy order for {quantity} shares of {symbol} at ${price:.2f} per share")
 
-        # Append the order to the list of orders
+        # Add the order to the list of pending orders
         self.orders.append(order)
-        orderIds = [order["id"]]
-
-        # Deduct the cost from the balance
+        order_ids = [order["id"]]
         self.balance -= cost
-
-        # Print a confirmation message
-        print(f"Placed a buy order for {quantity} shares of {symbol} at ${price:.2f} per share")
+        self.execute_order()
 
         if stop_loss:
-            order = {
-                "id": str(uuid.uuid4()), # Generate a unique id for the order
+            # Place a stop-loss sell order
+            stop_loss_order = {
+                "id": str(uuid.uuid4()),
                 "symbol": symbol,
                 "quantity": quantity,
                 "price": stop_loss,
                 "type": "sl_sell",
                 "status": "open",
             }
-            self.orders.append(order)
-            print(f"Placed a Sl Sell order for {quantity} shares of {symbol} at ${price:.2f} per share")
-            orderIds.append(order["id"])
-        
-        self.execute_order()
+            self.orders.append(stop_loss_order)
+            logger.info(f"Placed a SL Sell order for {quantity} shares of {symbol} at ${stop_loss:.2f} per share")
+            order_ids.append(stop_loss_order["id"])
 
-        return orderIds
+        return order_ids
 
-
-    def sell_stock(self, symbol: str, quantity: int, stop_loss: float=None, Limit:float=None):
-        """Sell a specified quantity of a stock with an optional stop-loss price.
+    def sell_stock(self, symbol: str, quantity: int, stop_loss: float = None, limit: float = None):
+        """
+        Place a sell order for a specified quantity of a stock.
 
         Args:
             symbol (str): The symbol of the stock to sell.
             quantity (int): The number of shares to sell.
-            stop_loss (float): The price at which to buy back the stock if it rises above this level.
+            stop_loss (float, optional): The price at which to buy back the stock if it rises above this level.
+            limit (float, optional): The minimum price at which to execute the sell order.
 
         Returns:
             bool: True if the order was placed successfully, False otherwise.
         """
         # Get the current price of the stock
         price = self.get_stock_price(symbol)
-
-        # Check if the price is valid
         if price <= 0:
-            print(f"Invalid price for {symbol}")
+            logger.error(f"Invalid price for {symbol}")
             return False
 
-        # Check if the holdings are sufficient
         if symbol not in self.holdings or quantity > self.holdings[symbol]:
-            print(f"Insufficient holdings to sell {quantity} shares of {symbol}")
+            logger.error(f"Insufficient holdings to sell {quantity} shares of {symbol}")
             return False
 
-        if Limit:
-            cost = quantity*Limit
-            # Create an order object with the details
+        if limit:
+            # Place a limit sell order
+            cost = quantity * limit
             order = {
-                "id": str(uuid.uuid4()), # Generate a unique id for the order
+                "id": str(uuid.uuid4()),
                 "symbol": symbol,
                 "quantity": quantity,
-                "price": Limit,
+                "price": limit,
                 "type": "limit_sell",
                 "status": "open",
             }
+            logger.info(f"Placed a Limit Sell order for {quantity} shares of {symbol} at ${limit:.2f} per share")
         else:
-            # Create an order object with the details
+            # Place a regular sell order
             order = {
-                "id": str(uuid.uuid4()), # Generate a unique id for the order
+                "id": str(uuid.uuid4()),
                 "symbol": symbol,
                 "quantity": quantity,
                 "price": price,
                 "type": "sell",
                 "status": "open",
             }
-        # Append the order to the list of orders
+            logger.info(f"Placed a Sell order for {quantity} shares of {symbol} at ${price:.2f} per share")
+
+        # Add the order to the list of pending orders
         self.orders.append(order)
         self.holdings[symbol] -= quantity
-
-        # Print a confirmation message
-        print(f"Placed a sell order for {quantity} shares of {symbol} at ${price:.2f} per share")
+        self.execute_order()
 
         if stop_loss:
-            order = {
-                "id": str(uuid.uuid4()), # Generate a unique id for the order
+            # Place a stop-loss buy order
+            stop_loss_order = {
+                "id": str(uuid.uuid4()),
                 "symbol": symbol,
                 "quantity": quantity,
                 "price": stop_loss,
                 "type": "sl_buy",
                 "status": "open",
             }
-            self.orders.append(order)
-            print(f"Placed a Sl Sell order for {quantity} shares of {symbol} at ${price:.2f} per share")
-        
-        self.execute_order()
-        
+            self.orders.append(stop_loss_order)
+            logger.info(f"Placed a SL Buy order for {quantity} shares of {symbol} at ${stop_loss:.2f} per share")
+
         return True
 
-    def get_stock_price(self, symbol: str = '',symbols:list = []) -> float|dict:
-        # Uses 5paisa for live data     
-        if symbol:
-            price = self.DataFeed.get_current_price(symbol)[symbol]
-            return price
-        else:
-            prices = self.DataFeed.get_current_price(symbols)
-            return prices
+    def get_stock_price(self, symbol: str = '', symbols: list = []):
+        """
+        Get the current price of a stock.
 
-    def get_account_balance(self) -> float:
-        # Return the current account balance in paper trading
-        return self.balance
-
-    def get_portfolio_holdings(self) -> dict:
-        """Get the current holdings in the portfolio.
+        Args:
+            symbol (str, optional): The symbol of the stock. If not provided, returns the prices for all symbols in the list.
+            symbols (list, optional): The list of symbols to retrieve prices for.
 
         Returns:
-            dict: A dictionary with the current holdings, as symbol: quantity pairs.
+            float or dict: The current price of the stock if a symbol is provided, or a dictionary of symbol-price pairs.
         """
-        # Return the holdings attribute
+        try:
+            if symbol:
+                price = self.DataFeed.get_current_price(symbol)[symbol]
+                return price
+            else:
+                prices = self.DataFeed.get_current_price(symbols)
+                return prices
+
+        except Exception as e:
+            logger.error(f"Error occurred while getting stock price: {str(e)}")
+            return 0.0
+
+    def get_account_balance(self):
+        """
+        Get the current account balance in paper trading.
+
+        Returns:
+            float: The current account balance.
+        """
+        return self.balance
+
+    def get_portfolio_holdings(self):
+        """
+        Get the current holdings in the portfolio.
+
+        Returns:
+            dict: A dictionary with the current holdings, as symbol-quantity pairs.
+        """
         return self.holdings
-    
+
     def place_order(
         self,
         symbol: str,
@@ -211,7 +243,8 @@ class PaperTradingBroker(Broker):
         stop_loss: float = None,
         limit: float = None,
     ):
-        """Place an order to buy or sell a stock with optional stop-loss and limit prices.
+        """
+        Place an order to buy or sell a stock with optional stop-loss and limit prices.
 
         Args:
             symbol (str): The symbol of the stock to buy or sell.
@@ -222,179 +255,254 @@ class PaperTradingBroker(Broker):
             limit (float, optional): The price at which to execute the order (for limit orders).
 
         Returns:
-            bool: True if the order was placed successfully, False otherwise.
+            list: A list of order IDs if the order was placed successfully, an empty list otherwise.
         """
-        # Check if the order_type is valid
-        if order_type not in ["buy", "sell"]:
-            print(f"Invalid order type: {order_type}")
-            return False
+        try:
+            if order_type not in ["buy", "sell"]:
+                logger.error(f"Invalid order type: {order_type}")
+                return []
 
-        # Check if the price is valid
-        if price <= 0:
-            print(f"Invalid price for {symbol}")
-            return False
-        
-        if limit:
-            order = {
-                "id": str(uuid.uuid4()),  # Generate a unique id for the order
-                "symbol": symbol,
-                "quantity": quantity,
-                "price": limit,
-                "type": "limit_"+order_type,
-                "status": "open",
-            }
-            print(f"Placed a Limit order for {quantity} shares of {symbol} at ${limit:.2f} per share")
-        
-        else:
-            # Create an order object with the details
-            order = {
-                "id": str(uuid.uuid4()),  # Generate a unique id for the order
-                "symbol": symbol,
-                "quantity": quantity,
-                "price": price,
-                "type": order_type,
-                "status": "open",
-            }
-            print(f"Placed a {order_type} order for {quantity} shares of {symbol} at ${price:.2f} per share")
+            if price <= 0:
+                logger.error(f"Invalid price for {symbol}")
+                return []
 
-        # Append the order to the list of orders
-        self.orders.append(order)
-        order_ids = [order["id"]]
+            if limit:
+                # Place a limit order
+                order = {
+                    "id": str(uuid.uuid4()),
+                    "symbol": symbol,
+                    "quantity": quantity,
+                    "price": limit,
+                    "type": "limit_" + order_type,
+                    "status": "open",
+                }
+                logger.info(f"Placed a Limit {order_type.capitalize()} order for {quantity} shares of {symbol} at ${limit:.2f} per share")
+            else:
+                # Place a regular order
+                order = {
+                    "id": str(uuid.uuid4()),
+                    "symbol": symbol,
+                    "quantity": quantity,
+                    "price": price,
+                    "type": order_type,
+                    "status": "open",
+                }
+                logger.info(f"Placed a {order_type.capitalize()} order for {quantity} shares of {symbol} at ${price:.2f} per share")
 
-        # Print a confirmation message
+            # Add the order to the list of pending orders
+            self.orders.append(order)
+            order_ids = [order["id"]]
 
-        if stop_loss:
-            stop_loss_order = {
-                "id": str(uuid.uuid4()),  # Generate a unique id for the order
-                "symbol": symbol,
-                "quantity": quantity,
-                "price": stop_loss,
-                "type": "sl_sell",
-                "status": "open",
-            }
-            self.orders.append(stop_loss_order)
-            print(f"Placed a SL Sell order for {quantity} shares of {symbol} at ${stop_loss:.2f} per share")
-            order_ids.append(stop_loss_order["id"])
+            if stop_loss:
+                # Place a stop-loss order
+                stop_loss_order = {
+                    "id": str(uuid.uuid4()),
+                    "symbol": symbol,
+                    "quantity": quantity,
+                    "price": stop_loss,
+                    "type": "sl_sell" if order_type == "buy" else "sl_buy",
+                    "status": "open",
+                }
+                self.orders.append(stop_loss_order)
+                logger.info(
+                    f"Placed a SL {'Sell' if order_type == 'buy' else 'Buy'} order for {quantity} shares of {symbol} at ${stop_loss:.2f} per share"
+                )
+                order_ids.append(stop_loss_order["id"])
 
-        self.execute_order()
+            self.execute_order()
 
-        return order_ids
+            return order_ids
+
+        except ValueError as ve:
+            logger.error(f"Invalid order: {str(ve)}")
+            return []
+
+        except Exception as e:
+            logger.error(f"Error occurred while placing order: {str(e)}")
+            return []
 
     def execute_order(self):
-        # Function to execute the orders
+        """
+        Execute the pending orders.
 
-        # Check if market is open before executing any orders
-        if self.get_market_status() != "Open":
-            print("Market is currently closed, orders will be executed when market opens.")
-            return
+        This method executes the pending orders based on the current market conditions.
+        """
+        try:
+            if self.get_market_status() != "Open":
+                logger.info("Market is currently closed, orders will be executed when the market opens.")
+                return
 
-        # Go through each order in the list of orders
-        for order in self.orders.copy(): # use copy() to prevent changing the list during iteration
-            current_price = self.get_stock_price(order['symbol'])
+            for order in self.orders.copy():
+                current_price = self.get_stock_price(order["symbol"])
 
-            # Execute the order based on the type
-            if order['type'] == 'buy':
-                self.balance -= order['quantity'] * order['price']
-                if order['symbol'] in self.holdings:
-                    self.holdings[order['symbol']] += order['quantity']
+                if order["type"] == "buy":
+                    # Execute a buy order
+                    self.balance -= order["quantity"] * order["price"]
+                    if order["symbol"] in self.holdings:
+                        self.holdings[order["symbol"]] += order["quantity"]
+                    else:
+                        self.holdings[order["symbol"]] = order["quantity"]
+                    self.orders.remove(order)
+                    logger.info(
+                        f"Executed Buy order for {order['quantity']} shares of {order['symbol']} at ${order['price']:.2f} per share"
+                    )
+
+                elif order["type"] == "sell":
+                    # Execute a sell order
+                    self.balance += order["quantity"] * order["price"]
+                    self.holdings[order["symbol"]] -= order["quantity"]
+                    self.orders.remove(order)
+                    logger.info(
+                        f"Executed Sell order for {order['quantity']} shares of {order['symbol']} at ${order['price']:.2f} per share"
+                    )
+
+                elif order["type"] == "limit_buy" and current_price <= order["price"]:
+                    # Execute a limit buy order if the current price is at or below the limit price
+                    self.balance -= order["quantity"] * order["price"]
+                    if order["symbol"] in self.holdings:
+                        self.holdings[order["symbol"]] += order["quantity"]
+                    else:
+                        self.holdings[order["symbol"]] = order["quantity"]
+                    self.orders.remove(order)
+                    logger.info(
+                        f"Executed Limit Buy order for {order['quantity']} shares of {order['symbol']} at ${order['price']:.2f} per share"
+                    )
+
+                elif order["type"] == "limit_sell" and current_price >= order["price"]:
+                    # Execute a limit sell order if the current price is at or above the limit price
+                    self.balance += order["quantity"] * order["price"]
+                    self.holdings[order["symbol"]] -= order["quantity"]
+                    self.orders.remove(order)
+                    logger.info(
+                        f"Executed Limit Sell order for {order['quantity']} shares of {order['symbol']} at ${order['price']:.2f} per share"
+                    )
+
+                elif order["type"] == "sl_sell" and current_price <= order["price"]:
+                    # Execute a stop-loss sell order if the current price is at or below the stop-loss price
+                    self.balance += order["quantity"] * order["price"]
+                    self.holdings[order["symbol"]] -= order["quantity"]
+                    self.orders.remove(order)
+                    logger.info(
+                        f"Executed SL Sell order for {order['quantity']} shares of {order['symbol']} at ${order['price']:.2f} per share"
+                    )
+
+                elif order["type"] == "sl_buy" and current_price >= order["price"]:
+                    # Execute a stop-loss buy order if the current price is at or above the stop-loss price
+                    self.balance -= order["quantity"] * order["price"]
+                    if order["symbol"] in self.holdings:
+                        self.holdings[order["symbol"]] += order["quantity"]
+                    else:
+                        self.holdings[order["symbol"]] = order["quantity"]
+                    self.orders.remove(order)
+                    logger.info(
+                        f"Executed SL Buy order for {order['quantity']} shares of {order['symbol']} at ${order['price']:.2f} per share"
+                    )
+
+                if order in self.orders:
+                    order["status"] = "open"
                 else:
-                    self.holdings[order['symbol']] = order['quantity']
-                self.orders.remove(order)
-                print(f"Executed buy order for {order['quantity']} shares of {order['symbol']} at ${order['price']:.2f} per share")
+                    order["status"] = "filled"
+                    self.executed_orders.append(order)
 
-            elif order['type'] == 'sell':
-                self.balance += order['quantity'] * order['price']
-                self.holdings[order['symbol']] -= order['quantity']
-                self.orders.remove(order)
-                print(f"Executed sell order for {order['quantity']} shares of {order['symbol']} at ${order['price']:.2f} per share")
+            logger.info("All orders have been executed")
 
-            elif order['type'] == 'limit_buy' and current_price <= order['price']:
-                self.balance -= order['quantity'] * order['price']
-                if order['symbol'] in self.holdings:
-                    self.holdings[order['symbol']] += order['quantity']
-                else:
-                    self.holdings[order['symbol']] = order['quantity']
-                self.orders.remove(order)
-                print(f"Executed limit buy order for {order['quantity']} shares of {order['symbol']} at ${order['price']:.2f} per share")
+        except Exception as e:
+            logger.error(f"Error occurred while executing orders: {str(e)}")
 
-            elif order['type'] == 'limit_sell' and current_price >= order['price']:
-                self.balance += order['quantity'] * order['price']
-                self.holdings[order['symbol']] -= order['quantity']
-                self.orders.remove(order)
-                print(f"Executed limit sell order for {order['quantity']} shares of {order['symbol']} at ${order['price']:.2f} per share")
-            
-            elif order['type'] == 'sl_sell' and current_price <= order['price']:
-                self.balance += order['quantity'] * order['price']
-                self.holdings[order['symbol']] -= order['quantity']
-                self.orders.remove(order)
-                print(f"Executed SL Sell order for {order['quantity']} shares of {order['symbol']} at ${order['price']:.2f} per share")
+    def cancel_order(self, order_id: str):
+        """
+        Cancel an order.
 
-            elif order['type'] == 'sl_buy' and current_price >= order['price']:
-                self.balance -= order['quantity'] * order['price']
-                if order['symbol'] in self.holdings:
-                    self.holdings[order['symbol']] += order['quantity']
-                else:
-                    self.holdings[order['symbol']] = order['quantity']
-                self.orders.remove(order)
-                print(f"Executed SL Buy order for {order['quantity']} shares of {order['symbol']} at ${order['price']:.2f} per share")
+        Args:
+            order_id (str): The ID of the order to cancel.
 
-            if order in self.orders:
-                order['status'] = 'open'
+        Returns:
+            bool: True if the order was successfully canceled, False otherwise.
+        """
+        try:
+            for order in self.orders:
+                if order_id == order["id"]:
+                    if "sl" in order["type"]:
+                        # Cancel a stop-loss order
+                        self.orders.remove(order)
+                        logger.info(f"Cancelled SL order with ID: {order_id}")
+                        return True
+                    elif "buy" in order["type"]:
+                        # Cancel a buy order
+                        self.orders.remove(order)
+                        self.balance += order["quantity"] * order["price"]
+                        logger.info(f"Cancelled Buy order with ID: {order_id}")
+                        return True
+                    elif "sell" in order["type"]:
+                        # Cancel a sell order
+                        self.orders.remove(order)
+                        self.holdings[order["symbol"]] += order["quantity"]
+                        logger.info(f"Cancelled Sell order with ID: {order_id}")
+                        return True
+
+            logger.warning(f"Order with ID: {order_id} not found")
+            return False
+
+        except Exception as e:
+            logger.error(f"Error occurred while canceling order: {str(e)}")
+            return False
+
+    def get_order_status(self, order_id: str):
+        """
+        Get the status of an order.
+
+        Args:
+            order_id (str): The ID of the order.
+
+        Returns:
+            str: The status of the order ('Open', 'Filled', or an error message).
+        """
+        try:
+            for order in self.orders:
+                if order_id == order["id"]:
+                    return "Open"
+
+            for order in self.executed_orders:
+                if order_id == order["id"]:
+                    return "Filled"
+
+            return "Order with this order_id does not exist"
+
+        except Exception as e:
+            logger.error(f"Error occurred while getting order status: {str(e)}")
+            return "Error occurred while getting order status"
+
+    def get_available_assets(self):
+        """
+        Get the list of available tradable assets.
+
+        Returns:
+            list: A list of available tradable assets.
+        """
+        try:
+            return list(self.DataFeed.symbol2scrip.keys())
+
+        except Exception as e:
+            logger.error(f"Error occurred while getting available assets: {str(e)}")
+            return []
+
+    def get_market_status(self):
+        """
+        Get the current market status.
+
+        Returns:
+            str: The current market status ('Open' or 'Closed').
+        """
+        try:
+            current_time = datetime.datetime.now().time()
+            market_open_time = datetime.time(9, 15)
+            market_close_time = datetime.time(15, 30)
+
+            if market_open_time <= current_time <= market_close_time:
+                return "Open"
             else:
-                order['status'] = 'filled'
-                self.executed_orders.append(order)
+                return "Closed"
 
-    # Print a message to indicate all orders have been processed
-    print("All orders have been executed")
-
-    def cancel_order(self, order_id: str) -> bool:
-        # Cancel an order in paper trading
-        for order in self.orders:
-            if order_id == order['id']:
-                if 'sl' in order['type']:
-                    self.orders.remove(order)
-                    return True
-                elif 'buy' in order['type']:
-                    self.orders.remove(order)
-                    self.balance += order['quantity'] * order['price']
-                    return True
-                elif 'sell' in order['type']:
-                    self.orders.remove(order)
-                    self.holdings[order['symbol']] += order['quantity']
-                    return True
-        
-        return False
-
-    def get_order_status(self, order_id: str) -> str:
-        # Get the status of an order in paper trading
-        for order in self.orders:
-            if order_id == order['id']:
-                return 'Open'
-        
-        for order in self.executed_orders:
-            if order_id == order['id']:
-                return 'Filled'
-        
-        return "Order with this order_id does not exists"
-            
-    def get_available_assets(self) -> list:
-        # Return a list of available tradable assets in paper trading
-        # This can be based on a predefined list of assets or simulated data
-        return list(self.DataFeed.symbol2scrip.keys())
-
-    def get_market_status(self) -> str:
-        # Return the current market status in paper trading
-        current_time = datetime.datetime.now().time()
-        
-        # Define the market opening and closing times
-        market_open = datetime.time(9, 0, 0)  # 9:00:00 AM
-        market_close = datetime.time(15, 30, 0)  # 3:30:00 PM
-
-        # Check if the current time is within the market hours
-        if market_open <= current_time <= market_close:
-            return "Open"
-        else:
-            return "Closed" 
-    
-    def __str__(self) -> str:
-        return f"Paper Trading Broker with balance: {self.balance} and holdings: {self.holdings}"
+        except Exception as e:
+            logger.error(f"Error occurred while getting market status: {str(e)}")
+            return "Error occurred while getting market status"
