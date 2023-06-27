@@ -1,3 +1,4 @@
+import datetime
 import uuid
 from broker import Broker
 from ApiKeys.secrets5p import (
@@ -105,6 +106,8 @@ class PaperTradingBroker(Broker):
             self.orders.append(order)
             print(f"Placed a Sl Sell order for {quantity} shares of {symbol} at ${price:.2f} per share")
             orderIds.append(order["id"])
+        
+        self.execute_order()
 
         return orderIds
 
@@ -172,6 +175,8 @@ class PaperTradingBroker(Broker):
             }
             self.orders.append(order)
             print(f"Placed a Sl Sell order for {quantity} shares of {symbol} at ${price:.2f} per share")
+        
+        self.execute_order()
         
         return True
 
@@ -271,10 +276,76 @@ class PaperTradingBroker(Broker):
             print(f"Placed a SL Sell order for {quantity} shares of {symbol} at ${stop_loss:.2f} per share")
             order_ids.append(stop_loss_order["id"])
 
+        self.execute_order()
 
         return order_ids
 
+    def execute_order(self):
+        # Function to execute the orders
 
+        # Check if market is open before executing any orders
+        if self.get_market_status() != "Open":
+            print("Market is currently closed, orders will be executed when market opens.")
+            return
+
+        # Go through each order in the list of orders
+        for order in self.orders.copy(): # use copy() to prevent changing the list during iteration
+            current_price = self.get_stock_price(order['symbol'])
+
+            # Execute the order based on the type
+            if order['type'] == 'buy':
+                self.balance -= order['quantity'] * order['price']
+                if order['symbol'] in self.holdings:
+                    self.holdings[order['symbol']] += order['quantity']
+                else:
+                    self.holdings[order['symbol']] = order['quantity']
+                self.orders.remove(order)
+                print(f"Executed buy order for {order['quantity']} shares of {order['symbol']} at ${order['price']:.2f} per share")
+
+            elif order['type'] == 'sell':
+                self.balance += order['quantity'] * order['price']
+                self.holdings[order['symbol']] -= order['quantity']
+                self.orders.remove(order)
+                print(f"Executed sell order for {order['quantity']} shares of {order['symbol']} at ${order['price']:.2f} per share")
+
+            elif order['type'] == 'limit_buy' and current_price <= order['price']:
+                self.balance -= order['quantity'] * order['price']
+                if order['symbol'] in self.holdings:
+                    self.holdings[order['symbol']] += order['quantity']
+                else:
+                    self.holdings[order['symbol']] = order['quantity']
+                self.orders.remove(order)
+                print(f"Executed limit buy order for {order['quantity']} shares of {order['symbol']} at ${order['price']:.2f} per share")
+
+            elif order['type'] == 'limit_sell' and current_price >= order['price']:
+                self.balance += order['quantity'] * order['price']
+                self.holdings[order['symbol']] -= order['quantity']
+                self.orders.remove(order)
+                print(f"Executed limit sell order for {order['quantity']} shares of {order['symbol']} at ${order['price']:.2f} per share")
+            
+            elif order['type'] == 'sl_sell' and current_price <= order['price']:
+                self.balance += order['quantity'] * order['price']
+                self.holdings[order['symbol']] -= order['quantity']
+                self.orders.remove(order)
+                print(f"Executed SL Sell order for {order['quantity']} shares of {order['symbol']} at ${order['price']:.2f} per share")
+
+            elif order['type'] == 'sl_buy' and current_price >= order['price']:
+                self.balance -= order['quantity'] * order['price']
+                if order['symbol'] in self.holdings:
+                    self.holdings[order['symbol']] += order['quantity']
+                else:
+                    self.holdings[order['symbol']] = order['quantity']
+                self.orders.remove(order)
+                print(f"Executed SL Buy order for {order['quantity']} shares of {order['symbol']} at ${order['price']:.2f} per share")
+
+            if order in self.orders:
+                order['status'] = 'open'
+            else:
+                order['status'] = 'filled'
+                self.executed_orders.append(order)
+
+    # Print a message to indicate all orders have been processed
+    print("All orders have been executed")
 
     def cancel_order(self, order_id: str) -> bool:
         # Cancel an order in paper trading
@@ -313,7 +384,17 @@ class PaperTradingBroker(Broker):
 
     def get_market_status(self) -> str:
         # Return the current market status in paper trading
-        return "Open"
+        current_time = datetime.datetime.now().time()
+        
+        # Define the market opening and closing times
+        market_open = datetime.time(9, 0, 0)  # 9:00:00 AM
+        market_close = datetime.time(15, 30, 0)  # 3:30:00 PM
+
+        # Check if the current time is within the market hours
+        if market_open <= current_time <= market_close:
+            return "Open"
+        else:
+            return "Closed" 
     
     def __str__(self) -> str:
         return f"Paper Trading Broker with balance: {self.balance} and holdings: {self.holdings}"
