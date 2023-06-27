@@ -35,7 +35,7 @@ class PaperTradingBroker(Broker):
         self.DataFeed.login(totp)
 
         
-    def buy_stock(self, symbol: str, quantity: int, stop_loss: float) -> bool:
+    def buy_stock(self, symbol: str, quantity: int, stop_loss: float=None, Limit: float=None):
         """Buy a specified quantity of a stock with an optional stop-loss price.
 
         Args:
@@ -60,19 +60,31 @@ class PaperTradingBroker(Broker):
             print(f"Insufficient balance to buy {quantity} shares of {symbol}")
             return False
 
-        # Create an order object with the details
-        order = {
-            "id": str(uuid.uuid4()), # Generate a unique id for the order
-            "symbol": symbol,
-            "quantity": quantity,
-            "price": price,
-            "stop_loss": stop_loss,
-            "type": "buy",
-            "status": "open",
-        }
+        if Limit:
+            cost = quantity*Limit
+            # Create an order object with the details
+            order = {
+                "id": str(uuid.uuid4()), # Generate a unique id for the order
+                "symbol": symbol,
+                "quantity": quantity,
+                "price": Limit,
+                "type": "limitBuy",
+                "status": "open",
+            }
+        else:
+            # Create an order object with the details
+            order = {
+                "id": str(uuid.uuid4()), # Generate a unique id for the order
+                "symbol": symbol,
+                "quantity": quantity,
+                "price": price,
+                "type": "buy",
+                "status": "open",
+            }
 
         # Append the order to the list of orders
         self.orders.append(order)
+        orderIds = [order["id"]]
 
         # Deduct the cost from the balance
         self.balance -= cost
@@ -80,11 +92,23 @@ class PaperTradingBroker(Broker):
         # Print a confirmation message
         print(f"Placed a buy order for {quantity} shares of {symbol} at ${price:.2f} per share")
 
-        # Return True
-        return True
+        if stop_loss:
+            order = {
+                "id": str(uuid.uuid4()), # Generate a unique id for the order
+                "symbol": symbol,
+                "quantity": quantity,
+                "price": stop_loss,
+                "type": "slSell",
+                "status": "open",
+            }
+            self.orders.append(order)
+            print(f"Placed a Sl Sell order for {quantity} shares of {symbol} at ${price:.2f} per share")
+            orderIds.append(order["id"])
+
+        return orderIds
 
 
-    def sell_stock(self, symbol: str, quantity: int, stop_loss: float) -> bool:
+    def sell_stock(self, symbol: str, quantity: int, stop_loss: float=None, Limit:float=None):
         """Sell a specified quantity of a stock with an optional stop-loss price.
 
         Args:
@@ -108,28 +132,46 @@ class PaperTradingBroker(Broker):
             print(f"Insufficient holdings to sell {quantity} shares of {symbol}")
             return False
 
-        # Create an order object with the details
-        order = {
-            "id": str(uuid.uuid4()), # Generate a unique id for the order
-            "symbol": symbol,
-            "quantity": quantity,
-            "price": price,
-            "stop_loss": stop_loss,
-            "type": "sell",
-            "status": "open",
-        }
-
+        if Limit:
+            cost = quantity*Limit
+            # Create an order object with the details
+            order = {
+                "id": str(uuid.uuid4()), # Generate a unique id for the order
+                "symbol": symbol,
+                "quantity": quantity,
+                "price": Limit,
+                "type": "limitSell",
+                "status": "open",
+            }
+        else:
+            # Create an order object with the details
+            order = {
+                "id": str(uuid.uuid4()), # Generate a unique id for the order
+                "symbol": symbol,
+                "quantity": quantity,
+                "price": price,
+                "type": "sell",
+                "status": "open",
+            }
         # Append the order to the list of orders
         self.orders.append(order)
-
-        # Add the revenue to the balance
-        revenue = price * quantity
-        self.balance += revenue
+        self.holdings[symbol] -= quantity
 
         # Print a confirmation message
         print(f"Placed a sell order for {quantity} shares of {symbol} at ${price:.2f} per share")
 
-        # Return True
+        if stop_loss:
+            order = {
+                "id": str(uuid.uuid4()), # Generate a unique id for the order
+                "symbol": symbol,
+                "quantity": quantity,
+                "price": stop_loss,
+                "type": "slBuy",
+                "status": "open",
+            }
+            self.orders.append(order)
+            print(f"Placed a Sl Sell order for {quantity} shares of {symbol} at ${price:.2f} per share")
+        
         return True
 
     def get_stock_price(self, symbol: str = '',symbols:list = []) -> float|dict:
@@ -153,24 +195,25 @@ class PaperTradingBroker(Broker):
         """
         # Return the holdings attribute
         return self.holdings
-
-
+    
     def place_order(
         self,
         symbol: str,
         quantity: int,
         order_type: str,
         price: float,
-        stop_loss: float,
-    ) -> bool:
-        """Place an order to buy or sell a stock with optional stop-loss price.
+        stop_loss: float = None,
+        limit: float = None,
+    ):
+        """Place an order to buy or sell a stock with optional stop-loss and limit prices.
 
         Args:
             symbol (str): The symbol of the stock to buy or sell.
             quantity (int): The number of shares to buy or sell.
             order_type (str): The type of the order, either 'buy' or 'sell'.
             price (float): The price at which to place the order.
-            stop_loss (float): The price at which to exit the position if it goes against the order.
+            stop_loss (float, optional): The price at which to exit the position if it goes against the order.
+            limit (float, optional): The price at which to execute the order (for limit orders).
 
         Returns:
             bool: True if the order was placed successfully, False otherwise.
@@ -184,26 +227,52 @@ class PaperTradingBroker(Broker):
         if price <= 0:
             print(f"Invalid price for {symbol}")
             return False
-
-        # Create an order object with the details
-        order = {
-            "id": str(uuid.uuid4()), # Generate a unique id for the order
-            "symbol": symbol,
-            "quantity": quantity,
-            "price": price,
-            "stop_loss": stop_loss,
-            "type": order_type,
-            "status": "open",
-        }
+        
+        if limit:
+            order = {
+                "id": str(uuid.uuid4()),  # Generate a unique id for the order
+                "symbol": symbol,
+                "quantity": quantity,
+                "price": limit,
+                "type": "limit",
+                "status": "open",
+            }
+            print(f"Placed a Limit order for {quantity} shares of {symbol} at ${limit:.2f} per share")
+        
+        else:
+            # Create an order object with the details
+            order = {
+                "id": str(uuid.uuid4()),  # Generate a unique id for the order
+                "symbol": symbol,
+                "quantity": quantity,
+                "price": price,
+                "type": order_type,
+                "status": "open",
+            }
+            print(f"Placed a {order_type} order for {quantity} shares of {symbol} at ${price:.2f} per share")
 
         # Append the order to the list of orders
         self.orders.append(order)
+        order_ids = [order["id"]]
 
         # Print a confirmation message
-        print(f"Placed a {order_type} order for {quantity} shares of {symbol} at ${price:.2f} per share")
 
-        # Return True
-        return True
+        if stop_loss:
+            stop_loss_order = {
+                "id": str(uuid.uuid4()),  # Generate a unique id for the order
+                "symbol": symbol,
+                "quantity": quantity,
+                "price": stop_loss,
+                "type": "slSell",
+                "status": "open",
+            }
+            self.orders.append(stop_loss_order)
+            print(f"Placed a SL Sell order for {quantity} shares of {symbol} at ${stop_loss:.2f} per share")
+            order_ids.append(stop_loss_order["id"])
+
+
+        return order_ids
+
 
 
     def cancel_order(self, order_id: str) -> bool:
