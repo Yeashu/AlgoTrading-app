@@ -1,8 +1,8 @@
-tests.ipynb
-test.ipynb
+har.ipynb
+hars.ipynb
 __pycache__/
 ApiKeys
 scrips/
-tests/
 backtests/tests.ipynb
 backtests/Results
+*.log
