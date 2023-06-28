@@ -5,7 +5,7 @@ import pandas as pd
 from py5paisa import FivePaisaClient
 from csv import reader
 
-from A_utils import convert_date_string
+from lib.A_utils import convert_date_string
 
 
 class FivePaisaWrapper:
@@ -353,7 +353,7 @@ class FivePaisaWrapper:
     
     def get_live_data(self,symbols:list):
         req=[{"Exchange":"N","ExchangeType":"C","Symbol":symbol} for symbol in symbols]
-        _data = self.client.fetch_market_feed(req)
+        _data = self.client.fetch_market_depth_by_symbol(req)
         data = {}
         for i,symbol in enumerate(symbols):
             data[symbol] = _data['Data'][i]
@@ -363,7 +363,8 @@ class FivePaisaWrapper:
 
     def get_current_price(self,symbols:list):
         ldata = self.get_live_data(symbols=symbols)
+        del ldata['Time']
         lprice = {}
         for symbol , data in ldata.items():
-            lprice[symbol] = data['LastTradeTime']
+            lprice[symbol] = data['LastTradedPrice']
         return lprice
