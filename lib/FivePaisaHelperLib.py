@@ -11,7 +11,7 @@ from lib.A_utils import convert_date_string
 
 
 class FivePaisaWrapper:
-    apiRate: int = 500
+    apiRate: int = 200
     calls_per_minute: int = 0
 
     def __init__(self, APP_NAME: str, APP_SOURCE: int, USER_ID: str, PASSWORD: str, USER_KEY: str, ENCRYPTION_KEY: str, client_code: int, pin: int) -> None:

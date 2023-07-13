@@ -1,7 +1,11 @@
 import csv
 import datetime
 import re
-def save_dict_to_csv(data_dict, save_directory, filename):
+import os
+
+import pandas as pd
+
+def save_dict_to_csv(data_dict: dict, save_directory: str, filename: str) -> None:
     """
     Saves a dictionary to a CSV file with specified directory and filename.
 
@@ -13,7 +17,7 @@ def save_dict_to_csv(data_dict, save_directory, filename):
     Returns:
         None
     """
-    file_path = f"{save_directory}/{filename}.csv"
+    file_path = os.path.join(save_directory, f"{filename}.csv")
 
     with open(file_path, mode='w', newline='') as file:
         writer = csv.writer(file)
@@ -21,12 +25,10 @@ def save_dict_to_csv(data_dict, save_directory, filename):
 
         for symbol, return_value in data_dict.items():
             writer.writerow([symbol, return_value])
-    
+
     print(f"Dictionary saved to {file_path}")
 
-
-
-def save_to_csv(df, symbol, filepath):
+def save_to_csv(df: pd.DataFrame, symbol: str, filepath: str) -> None:
     """
     Saves stock data to a CSV file.
 
@@ -37,11 +39,13 @@ def save_to_csv(df, symbol, filepath):
 
     """
     try:
-        filename = f'{filepath}/{symbol}.csv'
+        os.makedirs(filepath, exist_ok=True)  # Create the directory if it doesn't exist
+        filename = os.path.join(filepath, f'{symbol}.csv')
         df.to_csv(filename, index=True)
         print(f"{symbol} data saved to {filename}.")
     except Exception as e:
         print(f"Error occurred while saving {symbol} data to a CSV file: {str(e)}")
+
 
 def convert_date_string(date_string):
     match = re.search(r"\/Date\((\d+)([+-]\d{4})\)", date_string)
