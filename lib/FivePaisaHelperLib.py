@@ -1,61 +1,20 @@
+from typing import List, Dict
 import datetime
 import threading
 import time
 import pandas as pd
 from py5paisa import FivePaisaClient
 from csv import reader
+from tqdm import tqdm
 
 from lib.A_utils import convert_date_string
 
 
 class FivePaisaWrapper:
-    """
-    A class that wraps the functionality of the py5paisa library for accessing and downloading data from the 5paisa API.
+    apiRate: int = 500
+    calls_per_minute: int = 0
 
-    Attributes:
-        cred (dict): A dictionary containing the user credentials.
-        client (FivePaisaClient): An instance of the FivePaisaClient class for interacting with the 5paisa API.
-        client_code (int): The client code associated with the user.
-        pin (int): The PIN associated with the user.
-        symbol2scrip (dict): A dictionary mapping symbols to scrip codes.
-
-    Methods:
-        __init__(self, APP_NAME, APP_SOURCE, USER_ID, PASSWORD, USER_KEY, ENCRYPTION_KEY, client_code, pin):
-            Initializes the FivePaisaWrapper object with the provided credentials and client information.
-
-        load_conv_dict(self, filepath):
-            Loads a dictionary mapping symbols to scrip codes from a CSV file.
-
-        login(self, totp):
-            Logs in to the 5paisa API with the provided TOTP and PIN.
-
-        logged_in(self):
-            Checks if the user is logged in to the 5paisa API.
-
-        scrip_download(self, Exch, ExchangeSegment, ScripCode, interval, start, end):
-            Downloads historical data for a specific scrip from the 5paisa API.
-
-        download(self, symbols, interval, start, end, Exch='N', ExchangeSegment='C'):
-            Downloads historical data for multiple symbols from the 5paisa API.
-
-        download_intraday_data(self, symbols, interval, start, end, Exch='N', ExchangeSegment='C'):
-            Downloads intraday data for multiple symbols from the 5paisa API in batches of 5 months.
-    """
-
-    apiRate = 500
-    calls_per_minute = 0
-
-    def __init__(
-        self,
-        APP_NAME: str,
-        APP_SOURCE: int,
-        USER_ID: str,
-        PASSWORD: str,
-        USER_KEY: str,
-        ENCRYPTION_KEY: str,
-        client_code: int,
-        pin: int,
-    ):
+    def __init__(self, APP_NAME: str, APP_SOURCE: int, USER_ID: str, PASSWORD: str, USER_KEY: str, ENCRYPTION_KEY: str, client_code: int, pin: int) -> None:
         """
         Initializes the FivePaisaWrapper object with the provided credentials and client information.
 
@@ -69,7 +28,6 @@ class FivePaisaWrapper:
             client_code (int): The client code associated with the user.
             pin (int): The PIN associated with the user.
         """
-
         self.cred = {
             "APP_NAME": APP_NAME,
             "APP_SOURCE": APP_SOURCE,
@@ -83,14 +41,13 @@ class FivePaisaWrapper:
         self.pin = pin
         self.symbol2scrip = {}
 
-    def load_conv_dict(self, filepath):
+    def load_conv_dict(self, filepath: str) -> None:
         """
         Loads a dictionary mapping symbols to scrip codes from a CSV file.
 
         Args:
             filepath (str): The file path of the CSV file containing the symbol to scrip code mapping.
         """
-        # Load the dictionary from the CSV file
         dictionary = {}
         with open(filepath, "r") as csvfile:
             csv_reader = reader(csvfile)
@@ -100,37 +57,32 @@ class FivePaisaWrapper:
                 dictionary[key] = value
         self.symbol2scrip = dictionary
 
-    def login(self, totp: str):
+    def login(self, totp: str) -> None:
         """
         Logs in to the 5paisa API with the provided TOTP and PIN.
 
         Args:
-            totp (int): The TOTP (Time-based One-Time Password) for authentication.
+            totp (str): The TOTP (Time-based One-Time Password) for authentication.
         """
-        self.client.get_totp_session(
-            client_code=self.client_code, totp=totp, pin=self.pin
-        )
+        self.client.get_totp_session(client_code=self.client_code, totp=totp, pin=self.pin)
 
-    def logged_in(self):
+    def logged_in(self) -> bool:
         """
         Checks if the user is logged in to the 5paisa API.
 
         Returns:
             bool: True if the user is logged in, False otherwise.
         """
-        if 40 < len(self.client.Login_check()):
-            return False
-        else:
-            return True
+        return len(self.client.Login_check()) <= 40
 
-    def scrip_download(self, Exch, ExchangeSegment, ScripCode, interval, start, end):
+    def scrip_download(self, Exch: str, ExchangeSegment: str, ScripCode: str, interval: str, start: str, end: str) -> pd.DataFrame:
         """
         Downloads historical data for a specific scrip from the 5paisa API.
 
         Args:
             Exch (str): The exchange of the scrip.
             ExchangeSegment (str): The exchange segment of the scrip.
-            ScripCode (int): The scrip code of the scrip.
+            ScripCode (str): The scrip code of the scrip.
             interval (str): The time interval for the historical data.
             start (str): The start date for the historical data.
             end (str): The end date for the historical data.
@@ -138,117 +90,96 @@ class FivePaisaWrapper:
         Returns:
             pandas.DataFrame: The downloaded historical data as a DataFrame.
         """
+        return self.client.historical_data(Exch=Exch, ExchangeSegment=ExchangeSegment, ScripCode=ScripCode, time=interval, From=start, To=end)
 
-        return self.client.historical_data(
-            Exch=Exch,
-            ExchangeSegment=ExchangeSegment,
-            ScripCode=ScripCode,
-            time=interval,
-            From=start,
-            To=end,
-        )
-
-    def download(
-        self,
-        symbols: list,
-        interval,
-        start,
-        end,
-        Exch="N",
-        ExchangeSegment="C",
-        resetRate: bool = True,
-        verbose: bool = True,
-    ):
+    def _download_data(self, symbol: str, interval: str, start: str, end: str, Exch: str, ExchangeSegment: str, downloadedDataFrames: dict, verbose: bool, lock: threading.Lock) -> None:
         """
-        Downloads data for the given symbols and time range from the specified exchange uses multithreading.
+        Helper method for downloading data for a symbol within a specified time range.
 
         Args:
-            symbols (list): List of symbols to download data for.
-            interval: Interval of data (e.g., '1min', '5min', 'day').
-            start: Start date of the data in the format 'YYYY-MM-DD'.
-            end: End date of the data in the format 'YYYY-MM-DD'.
+            symbol (str): The symbol for which to download data.
+            interval (str): Interval of data (e.g., '1min', '5min', 'day').
+            start (str): Start date of the data in the format 'YYYY-MM-DD'.
+            end (str): End date of the data in the format 'YYYY-MM-DD'.
+            Exch (str): Exchange code.
+            ExchangeSegment (str): Exchange segment code.
+            downloadedDataFrames (dict): Dictionary to store the downloaded data for each symbol.
+            verbose (bool): Whether to print progress information.
+            lock (threading.Lock): Lock for synchronizing access to the shared downloadedDataFrames dictionary.
+        """
+        if self.calls_per_minute >= self.apiRate:
+            if verbose:
+                print("API limit reached. Waiting for 60 seconds...")
+            time.sleep(60)
+            self.calls_per_minute = 0
+
+        scrip = self.symbol2scrip[symbol]
+        data = self.scrip_download(
+            Exch=Exch,
+            ExchangeSegment=ExchangeSegment,
+            ScripCode=scrip,
+            interval=interval,
+            start=start,
+            end=end,
+        )
+
+        data.set_index("Datetime", inplace=True)
+        data.index = pd.to_datetime(data.index)
+
+        downloadedDataFrames[symbol] = data
+
+        lock.acquire()
+        try:
+            self.calls_per_minute += 1
+        finally:
+            lock.release()
+
+    def download(self, symbols: List[str], interval: str, start: str, end: str, Exch: str = "N", ExchangeSegment: str = "C", resetRate: bool = True, verbose: bool = True) -> Dict[str, pd.DataFrame]:
+        """
+        Downloads data for the given symbols and time range from the specified exchange using multithreading.
+
+        Args:
+            symbols (List[str]): List of symbols to download data for.
+            interval (str): Interval of data (e.g., '1min', '5min', 'day').
+            start (str): Start date of the data in the format 'YYYY-MM-DD'.
+            end (str): End date of the data in the format 'YYYY-MM-DD'.
             Exch (str, optional): Exchange code. Default is 'N'.
             ExchangeSegment (str, optional): Exchange segment code. Default is 'C'.
             resetRate (bool, optional): Whether to reset the API call rate counter. Default is True.
             verbose (bool, optional): Whether to print progress information. Default is True.
 
         Returns:
-            dict: A dictionary containing the downloaded data for each symbol.
+            Dict[str, pd.DataFrame]: A dictionary containing the downloaded data for each symbol.
         """
-
         if resetRate:
             self.calls_per_minute = 0
         downloadedDataFrames = {}
-        lock = (
-            threading.Lock()
-        )  # we are not locking for data as each worker function modifies a unique key of the dict
+        lock = threading.Lock()
 
-        def download_data(symbol):
-            nonlocal downloadedDataFrames
-
-            # Implement API call limit
-            if self.calls_per_minute >= self.apiRate:
-                time.sleep(60)  # Pause for 60 seconds (1 minute)
-                self.calls_per_minute = 0
-
-            if verbose:
-                print(f"Downloading {symbol} data")
-
-            scrip = self.symbol2scrip[symbol]
-            data = self.scrip_download(
-                Exch=Exch,
-                ExchangeSegment=ExchangeSegment,
-                ScripCode=scrip,
-                interval=interval,
-                start=start,
-                end=end,
-            )
-
-            # Set date column as index
-            data.set_index("Datetime", inplace=True)
-
-            # Not locking but can Acquire lock to update the shared downloadedDataFrames dictionary here
-            downloadedDataFrames[symbol] = data
-
-            lock.acquire()
-            try:
-                self.calls_per_minute += 1
-            finally:
-                lock.release()
+        threads = []
+        for symbol in symbols:
+            thread = threading.Thread(target=self._download_data, args=(symbol, interval, start, end, Exch, ExchangeSegment, downloadedDataFrames, verbose, lock))
+            thread.start()
+            threads.append(thread)
 
         if verbose:
             print(f"Downloading data for {len(symbols)} symbols")
 
-        threads = []
-        for symbol in symbols:
-            # Spawn a thread to download data for each symbol
-            thread = threading.Thread(target=download_data, args=(symbol,))
-            thread.start()
-            threads.append(thread)
-
-        # Wait for all threads to complete
-        for thread in threads:
-            thread.join()
+        # Use tqdm for progress feedback
+        with tqdm(total=len(threads), ncols=80, bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}") as pbar:
+            for thread in threads:
+                thread.join()
+                pbar.update(1)
 
         return downloadedDataFrames
 
-    def download_intraday_data(
-        self,
-        symbols: list,
-        interval,
-        start: datetime.datetime,
-        end: datetime.datetime,
-        Exch="N",
-        ExchangeSegment="C",
-        verbose: bool = True,
-        resetRate: bool = True,
-    ):
+    def download_intraday_data(self, symbols: List[str], interval: str, start: datetime.datetime, end: datetime.datetime, Exch: str = "N", ExchangeSegment: str = "C", verbose: bool = True, resetRate: bool = True) -> Dict[str, pd.DataFrame]:
         """
         Downloads intraday data for the given symbols and time range from the specified exchange.
 
         Args:
-            symbols (list): List of symbols to download data for.
-            interval: Interval of data (e.g., '1min', '5min', 'day').
+            symbols (List[str]): List of symbols to download data for.
+            interval (str): Interval of data (e.g., '1min', '5min', 'day').
             start (datetime.datetime): Start date and time of the data.
             end (datetime.datetime): End date and time of the data.
             Exch (str, optional): Exchange code. Default is 'N'.
@@ -257,101 +188,51 @@ class FivePaisaWrapper:
             resetRate (bool, optional): Whether to reset the API call rate counter. Default is True.
 
         Returns:
-            dict: A dictionary containing the downloaded intraday data for each symbol.
+            Dict[str, pd.DataFrame]: A dictionary containing the downloaded intraday data for each symbol.
         """
         if resetRate:
             self.calls_per_minute = 0
         downloadedDataFrames = {}
-        lock = threading.Lock()  # Lock to synchronize access to downloadedDataFrames
-
-        def download_data(symbol, current_start, current_end):
-            """
-            Downloads intraday data for a symbol within a given time range.
-
-            Args:
-                symbol (str): The symbol for which to download data.
-                current_start (datetime.datetime): The start date and time of the current batch.
-                current_end (datetime.datetime): The end date and time of the current batch.
-            """
-            nonlocal downloadedDataFrames
-            nonlocal lock
-
-            # Implement API call limit
-            if self.calls_per_minute >= self.apiRate:
-                if verbose:
-                    print("API limit reached. Waiting for 60 seconds...")
-                time.sleep(60)  # Pause for 60 seconds (1 minute)
-                self.calls_per_minute = 0
-
-            # Download historical data for the current batch
-            scrip = self.symbol2scrip[symbol]
-            data = self.scrip_download(
-                Exch=Exch,
-                ExchangeSegment=ExchangeSegment,
-                ScripCode=scrip,
-                interval=interval,
-                start=current_start.strftime("%Y-%m-%d"),
-                end=current_end.strftime("%Y-%m-%d"),
-            )
-            self.calls_per_minute += 1
-
-            # Set date column as index
-            data.set_index("Datetime", inplace=True)
-            data.index = pd.to_datetime(data.index)
-
-            # Store the downloaded data in a local dictionary
-            local_dict = {symbol: data}
-
-            # Acquire lock to update the shared downloadedDataFrames dictionary
-            lock.acquire()
-            try:
-                for key, value in local_dict.items():
-                    if key not in downloadedDataFrames:
-                        downloadedDataFrames[key] = value
-                    else:
-                        # Concatenate the data if the symbol already exists in the dictionary
-                        downloadedDataFrames[key] = pd.concat(
-                            [downloadedDataFrames[key], value]
-                        )
-            finally:
-                lock.release()
-
-        if verbose:
-            print(f"Downloading data for {len(symbols)} symbols")
+        lock = threading.Lock()
 
         threads = []
         for symbol in symbols:
-            # Split the date range into batches of 5 months
             current_start = start
-            if verbose:
-                print(f"Downloading {symbol} data")
-
             while current_start < end:
                 current_end = current_start + datetime.timedelta(days=175)
                 if current_end > end:
                     current_end = end
 
-                # Spawn a thread to download data for the current batch
-                thread = threading.Thread(
-                    target=download_data, args=(symbol, current_start, current_end)
-                )
+                thread = threading.Thread(target=self._download_data, args=(symbol, interval, current_start.strftime("%Y-%m-%d"), current_end.strftime("%Y-%m-%d"), Exch, ExchangeSegment, downloadedDataFrames, verbose, lock))
                 thread.start()
                 threads.append(thread)
 
-                # Increment the current_start for the next batch
                 current_start = current_end + datetime.timedelta(days=1)
 
-        # Wait for all threads to complete
-        for thread in threads:
-            thread.join()
+        if verbose:
+            print(f"Downloading data for {len(symbols)} symbols")
 
-        # Sort the downloaded data by index (Datetime)
+        # Use tqdm for progress feedback
+        with tqdm(total=len(threads), ncols=80, bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}") as pbar:
+            for thread in threads:
+                thread.join()
+                pbar.update(1)
+
         for symbol, df in downloadedDataFrames.items():
             downloadedDataFrames[symbol] = df.sort_index()
 
         return downloadedDataFrames
     
-    def get_live_data(self,symbols:list):
+    def get_live_data(self, symbols: List[str]) -> Dict:
+        """
+        Retrieves live market data for the given symbols.
+
+        Args:
+            symbols (List[str]): List of symbols to retrieve live market data for.
+
+        Returns:
+            Dict: A dictionary containing the live market data for each symbol.
+        """
         req=[{"Exchange":"N","ExchangeType":"C","Symbol":symbol} for symbol in symbols]
         _data = self.client.fetch_market_depth_by_symbol(req)
         data = {}
@@ -361,7 +242,16 @@ class FivePaisaWrapper:
 
         return data
 
-    def get_current_price(self,symbols:list):
+    def get_current_price(self, symbols: List[str]) -> Dict[str, float]:
+        """
+        Retrieves the current price for the given symbols.
+
+        Args:
+            symbols (List[str]): List of symbols to retrieve the current price for.
+
+        Returns:
+            Dict[str, float]: A dictionary containing the current price for each symbol.
+        """
         ldata = self.get_live_data(symbols=symbols)
         del ldata['Time']
         lprice = {}
