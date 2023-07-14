@@ -1,18 +1,24 @@
+import sys
+import os
+from threading import Lock
+parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.append(parent_dir)
 from typing import List, Dict
 import datetime
-import threading
-import time
+import pandas as pd
+from typing import List, Dict
+import datetime
 import pandas as pd
 from py5paisa import FivePaisaClient
 from csv import reader
 from tqdm import tqdm
-
+from concurrent.futures import ThreadPoolExecutor
+from ratelimiter import RateLimiter
 from lib.A_utils import convert_date_string
 
 
 class FivePaisaWrapper:
     apiRate: int = 200
-    calls_per_minute: int = 0
 
     def __init__(self, APP_NAME: str, APP_SOURCE: int, USER_ID: str, PASSWORD: str, USER_KEY: str, ENCRYPTION_KEY: str, client_code: int, pin: int) -> None:
         """
@@ -40,6 +46,8 @@ class FivePaisaWrapper:
         self.client_code = client_code
         self.pin = pin
         self.symbol2scrip = {}
+        self.rate_limiter = RateLimiter(max_calls=self.apiRate, period=60)
+        self.lock = Lock()
 
     def load_conv_dict(self, filepath: str) -> None:
         """
@@ -66,163 +74,116 @@ class FivePaisaWrapper:
         """
         self.client.get_totp_session(client_code=self.client_code, totp=totp, pin=self.pin)
 
-    def logged_in(self) -> bool:
+    def _download_data(self, symbol: str, interval: str, start: str, end: str, Exch: str, ExchangeSegment: str, downloadedDataFrames: dict, verbose: bool) -> None:
         """
-        Checks if the user is logged in to the 5paisa API.
+        Private helper method to download data for a single symbol.
 
-        Returns:
-            bool: True if the user is logged in, False otherwise.
+        :param symbol: The symbol for which to download data.
+        :param interval: The time interval of data (e.g., '1min', '5min', 'day').
+        :param start: Start date of the data in 'YYYY-MM-DD' format.
+        :param end: End date of the data in 'YYYY-MM-DD' format.
+        :param Exch: The exchange code.
+        :param ExchangeSegment: The exchange segment code.
+        :param downloadedDataFrames: A dictionary to store the downloaded data for each symbol.
+        :param verbose: If True, print progress information.
         """
-        return len(self.client.Login_check()) <= 40
+        with self.rate_limiter:
+            scrip = self.symbol2scrip[symbol]
+            data = self.client.historical_data(
+                Exch=Exch,
+                ExchangeSegment=ExchangeSegment,
+                ScripCode=scrip,
+                time=interval,
+                From=start,
+                To=end,
+            )
 
-    def scrip_download(self, Exch: str, ExchangeSegment: str, ScripCode: str, interval: str, start: str, end: str) -> pd.DataFrame:
+            data.set_index("Datetime", inplace=True)
+            data.index = pd.to_datetime(data.index)
+
+            # Use lock to ensure thread safety when accessing shared resource
+            with self.lock:
+                if symbol in downloadedDataFrames:
+                    # If data for this symbol already exists, append new data
+                    downloadedDataFrames[symbol] = pd.concat([downloadedDataFrames[symbol], data])
+                else:
+                    # If this is the first batch of data for this symbol, just assign it
+                    downloadedDataFrames[symbol] = data
+
+    def download(self, symbols: List[str], interval: str, start: str, end: str, Exch: str = "N", ExchangeSegment: str = "C", verbose: bool = True) -> Dict[str, pd.DataFrame]:
         """
-        Downloads historical data for a specific scrip from the 5paisa API.
+        Download historical data for given symbols over a specified time range.
 
-        Args:
-            Exch (str): The exchange of the scrip.
-            ExchangeSegment (str): The exchange segment of the scrip.
-            ScripCode (str): The scrip code of the scrip.
-            interval (str): The time interval for the historical data.
-            start (str): The start date for the historical data.
-            end (str): The end date for the historical data.
-
-        Returns:
-            pandas.DataFrame: The downloaded historical data as a DataFrame.
+        :param symbols: List of symbols to download data for.
+        :param interval: The time interval of data (e.g., '1min', '5min', 'day').
+        :param start: Start date of the data in 'YYYY-MM-DD' format.
+        :param end: End date of the data in 'YYYY-MM-DD' format.
+        :param Exch: The exchange code.
+        :param ExchangeSegment: The exchange segment code.
+        :param verbose: If True, print progress information.
+        :return: A dictionary containing the downloaded data for each symbol.
         """
-        return self.client.historical_data(Exch=Exch, ExchangeSegment=ExchangeSegment, ScripCode=ScripCode, time=interval, From=start, To=end)
-
-    def _download_data(self, symbol: str, interval: str, start: str, end: str, Exch: str, ExchangeSegment: str, downloadedDataFrames: dict, verbose: bool, lock: threading.Lock) -> None:
-        """
-        Helper method for downloading data for a symbol within a specified time range.
-
-        Args:
-            symbol (str): The symbol for which to download data.
-            interval (str): Interval of data (e.g., '1min', '5min', 'day').
-            start (str): Start date of the data in the format 'YYYY-MM-DD'.
-            end (str): End date of the data in the format 'YYYY-MM-DD'.
-            Exch (str): Exchange code.
-            ExchangeSegment (str): Exchange segment code.
-            downloadedDataFrames (dict): Dictionary to store the downloaded data for each symbol.
-            verbose (bool): Whether to print progress information.
-            lock (threading.Lock): Lock for synchronizing access to the shared downloadedDataFrames dictionary.
-        """
-        if self.calls_per_minute >= self.apiRate:
-            if verbose:
-                print("API limit reached. Waiting for 60 seconds...")
-            time.sleep(60)
-            self.calls_per_minute = 0
-
-        scrip = self.symbol2scrip[symbol]
-        data = self.scrip_download(
-            Exch=Exch,
-            ExchangeSegment=ExchangeSegment,
-            ScripCode=scrip,
-            interval=interval,
-            start=start,
-            end=end,
-        )
-
-        data.set_index("Datetime", inplace=True)
-        data.index = pd.to_datetime(data.index)
-
-        downloadedDataFrames[symbol] = data
-
-        lock.acquire()
-        try:
-            self.calls_per_minute += 1
-        finally:
-            lock.release()
-
-    def download(self, symbols: List[str], interval: str, start: str, end: str, Exch: str = "N", ExchangeSegment: str = "C", resetRate: bool = True, verbose: bool = True) -> Dict[str, pd.DataFrame]:
-        """
-        Downloads data for the given symbols and time range from the specified exchange using multithreading.
-
-        Args:
-            symbols (List[str]): List of symbols to download data for.
-            interval (str): Interval of data (e.g., '1min', '5min', 'day').
-            start (str): Start date of the data in the format 'YYYY-MM-DD'.
-            end (str): End date of the data in the format 'YYYY-MM-DD'.
-            Exch (str, optional): Exchange code. Default is 'N'.
-            ExchangeSegment (str, optional): Exchange segment code. Default is 'C'.
-            resetRate (bool, optional): Whether to reset the API call rate counter. Default is True.
-            verbose (bool, optional): Whether to print progress information. Default is True.
-
-        Returns:
-            Dict[str, pd.DataFrame]: A dictionary containing the downloaded data for each symbol.
-        """
-        if resetRate:
-            self.calls_per_minute = 0
         downloadedDataFrames = {}
-        lock = threading.Lock()
 
-        threads = []
-        for symbol in symbols:
-            thread = threading.Thread(target=self._download_data, args=(symbol, interval, start, end, Exch, ExchangeSegment, downloadedDataFrames, verbose, lock))
-            thread.start()
-            threads.append(thread)
+        with ThreadPoolExecutor(max_workers=16) as executor:
+            futures = []
+            for symbol in symbols:
+                futures.append(executor.submit(self._download_data, symbol, interval, start, end, Exch, ExchangeSegment, downloadedDataFrames, verbose))
 
-        if verbose:
-            print(f"Downloading data for {len(symbols)} symbols")
-
-        # Use tqdm for progress feedback
-        with tqdm(total=len(threads), ncols=80, bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}") as pbar:
-            for thread in threads:
-                thread.join()
-                pbar.update(1)
+            if verbose:
+                with tqdm(total=len(futures), ncols=80, bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}") as pbar:
+                    for future in futures:
+                        future.result()
+                        pbar.update(1)
+            else:
+                for future in futures:
+                    future.result()
 
         return downloadedDataFrames
 
-    def download_intraday_data(self, symbols: List[str], interval: str, start: datetime.datetime, end: datetime.datetime, Exch: str = "N", ExchangeSegment: str = "C", verbose: bool = True, resetRate: bool = True) -> Dict[str, pd.DataFrame]:
+    def download_intraday_data(self, symbols: List[str], interval: str, start: datetime.datetime, end: datetime.datetime, Exch: str = "N", ExchangeSegment: str = "C", verbose: bool = True) -> Dict[str, pd.DataFrame]:
         """
-        Downloads intraday data for the given symbols and time range from the specified exchange.
+        Download intraday data for given symbols over a specified time range.
 
-        Args:
-            symbols (List[str]): List of symbols to download data for.
-            interval (str): Interval of data (e.g., '1min', '5min', 'day').
-            start (datetime.datetime): Start date and time of the data.
-            end (datetime.datetime): End date and time of the data.
-            Exch (str, optional): Exchange code. Default is 'N'.
-            ExchangeSegment (str, optional): Exchange segment code. Default is 'C'.
-            verbose (bool, optional): Whether to print progress information. Default is True.
-            resetRate (bool, optional): Whether to reset the API call rate counter. Default is True.
-
-        Returns:
-            Dict[str, pd.DataFrame]: A dictionary containing the downloaded intraday data for each symbol.
+        :param symbols: List of symbols to download data for.
+        :param interval: The time interval of data (e.g., '1min', '5min', 'day').
+        :param start: Start date and time of the data.
+        :param end: End date and time of the data.
+        :param Exch: The exchange code.
+        :param ExchangeSegment: The exchange segment code.
+        :param verbose: If True, print progress information.
+        :return: A dictionary containing the downloaded intraday data for each symbol.
         """
-        if resetRate:
-            self.calls_per_minute = 0
         downloadedDataFrames = {}
-        lock = threading.Lock()
 
-        threads = []
-        for symbol in symbols:
-            current_start = start
-            while current_start < end:
-                current_end = current_start + datetime.timedelta(days=175)
-                if current_end > end:
-                    current_end = end
+        with ThreadPoolExecutor(max_workers=16) as executor:
+            futures = []
+            for symbol in symbols:
+                current_start = start
+                while current_start < end:
+                    current_end = current_start + datetime.timedelta(days=175)
+                    if current_end > end:
+                        current_end = end
 
-                thread = threading.Thread(target=self._download_data, args=(symbol, interval, current_start.strftime("%Y-%m-%d"), current_end.strftime("%Y-%m-%d"), Exch, ExchangeSegment, downloadedDataFrames, verbose, lock))
-                thread.start()
-                threads.append(thread)
+                    futures.append(executor.submit(self._download_data, symbol, interval, current_start.strftime("%Y-%m-%d"), current_end.strftime("%Y-%m-%d"), Exch, ExchangeSegment, downloadedDataFrames, verbose))
 
-                current_start = current_end + datetime.timedelta(days=1)
+                    current_start = current_end + datetime.timedelta(days=1)
 
-        if verbose:
-            print(f"Downloading data for {len(symbols)} symbols")
-
-        # Use tqdm for progress feedback
-        with tqdm(total=len(threads), ncols=80, bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}") as pbar:
-            for thread in threads:
-                thread.join()
-                pbar.update(1)
+            if verbose:
+                with tqdm(total=len(futures), ncols=80, bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}") as pbar:
+                    for future in futures:
+                        future.result()
+                        pbar.update(1)
+            else:
+                for future in futures:
+                    future.result()
 
         for symbol, df in downloadedDataFrames.items():
+            # Sort the DataFrame by index (datetime) in ascending order
             downloadedDataFrames[symbol] = df.sort_index()
 
         return downloadedDataFrames
-    
+
     def get_live_data(self, symbols: List[str]) -> Dict:
         """
         Retrieves live market data for the given symbols.
