@@ -16,17 +16,20 @@ Functions:
 Classes:
 - RateLimiter: Implements rate limiting functionality for controlling API calls.
 """
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import csv
 import datetime
 import glob
 import re
 import os
+from typing import Dict, List, Optional
 import pandas as pd
 import time
 import threading
 from pandas.tseries.offsets import BDay
 from collections import deque
 from queue import Queue, Empty
+from tqdm import tqdm
 
 
 class RateLimiter:
@@ -249,12 +252,15 @@ def merge_and_clean_csv_files(directory0: str, directory2: str) -> None:
     print(f"Processed {len(csv_files0)} CSV files.")
 
 
-def find_missing_intervals(df: pd.DataFrame) -> pd.DatetimeIndex:
+def find_missing_intervals(df: pd.DataFrame,startTime:str,endTime:str,freq:str='15T') -> pd.DatetimeIndex:
     """
     Find missing intervals in a DataFrame.
 
     Args:
         df (pandas.DataFrame): DataFrame containing the data.
+        startTime (str): Start time of the trading hours (HH:MM format).
+        endTime (str): End time of the trading hours (HH:MM format).
+        freq (str, optional): Frequency of intervals (default='15T').
 
     Returns:
         pandas.DatetimeIndex: DatetimeIndex of missing entries.
@@ -270,7 +276,7 @@ def find_missing_intervals(df: pd.DataFrame) -> pd.DatetimeIndex:
     end = df.index.max().normalize()
     business_days = pd.date_range(start=start, end=end, freq=BDay())
 
-    trading_hours = pd.date_range(start='8:15', end='15:15', freq='15T')
+    trading_hours = pd.date_range(start=startTime, end=endTime, freq=freq)
     trading_times = trading_hours.time
 
     # Create a DatetimeIndex of expected trading times
@@ -292,17 +298,23 @@ def find_missing_intervals(df: pd.DataFrame) -> pd.DatetimeIndex:
     return missing_entries
 
 
-def get_missing_dates(missing_entries: pd.DatetimeIndex) -> pd.DatetimeIndex:
+def get_missing_dates(missing_entries: pd.DatetimeIndex, by_month: Optional[bool] = False) -> pd.DatetimeIndex:
     """
     Get the missing dates from the missing entries.
 
     Args:
         missing_entries (pandas.DatetimeIndex): DatetimeIndex of missing entries.
+        by_month (bool, optional): If True, return missing dates by month (default=False).
 
     Returns:
         pandas.DatetimeIndex: DatetimeIndex of missing dates.
     """
-    return pd.to_datetime([time.normalize() for time in missing_entries]).unique()
+    missing_dates = pd.to_datetime([time.normalize() for time in missing_entries]).unique()
+    
+    if by_month:
+        missing_dates = missing_dates.to_period('M').unique().to_timestamp()
+    
+    return missing_dates
 
 
 def get_file_names(directory: str) -> set:
@@ -322,3 +334,44 @@ def get_file_names(directory: str) -> set:
             file_names.add(filename.split('.')[-1])
 
     return file_names
+
+def download_missing_data(dfs: List[pd.DataFrame], missing_dates: List[pd.DatetimeIndex], symbols: List[str],app, interval: str = '15m') -> Dict[str, pd.DataFrame]:
+    """
+    Download missing data for the given missing dates by symbol and concatenate with the existing DataFrames.
+
+    Args:
+        dfs (List[pd.DataFrame]): List of existing DataFrames.
+        missing_dates (List[pd.DatetimeIndex]): List of DatetimeIndex of missing dates for each symbol.
+        symbols (List[str]): List of symbols.
+        app (FivePaisaWrapper) : For downloading data
+        interval (str, optional): Time interval for the download (default: '15m').
+
+    Returns:
+        Dict[str, pd.DataFrame]: Dictionary containing the downloaded data for each symbol.
+    """
+    downloaded_data_frames = {}
+    symbol_futures = {}  # Dictionary to associate futures with symbols
+
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        for i, symbol in enumerate(symbols):
+            downloaded_data_frames[symbol] = dfs[i].copy()  # Copy the existing DataFrame
+
+            for date in missing_dates[i]:
+                start = date.strftime('%Y-%m-%d')
+                end = (date + pd.offsets.MonthEnd(0)).strftime('%Y-%m-%d')
+                future = executor.submit(app._download_data,symbol, interval, start, end, 'N','C', downloaded_data_frames)
+                symbol_futures[future] = symbol
+
+        with tqdm(total=len(symbol_futures), ncols=80, bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} - {desc}") as pbar:
+            for future in as_completed(symbol_futures):
+                symbol = symbol_futures[future]
+                pbar.set_description(f"Downloading data for {symbol}")
+                future.result()
+                pbar.update(1)
+
+    # Sort the index and drop duplicates for each symbol
+    for symbol, df in downloaded_data_frames.items():
+        df.sort_index(inplace=True)
+        df.drop_duplicates(inplace=True)
+
+    return downloaded_data_frames

@@ -68,3 +68,16 @@ nifty_healthcare = ['ABBOTINDIA', 'ALKEM', 'APOLLOHOSP', 'AUROPHARMA', 'BIOCON',
 nifty_realty = ['BRIGADE', 'DLF', 'GODREJPROP', 'HEMIPROP', 'IBREALEST', 'OBEROIRLTY', 'PHOENIXLTD', 'PRESTIGE', 'SOBHA', 'SUNTECK']
 
 nifty_next_50 = ['ACC', 'ADANIENT', 'ADANITRANS', 'AMBUJACEM', 'BAJAJHLDNG', 'BANDHANBNK', 'BANKBARODA', 'BERGEPAINT', 'INDUSTOWER', 'BIOCON', 'BOSCHLTD', 'ZYDUSLIFE', 'CHOLAFIN', 'COLPAL', 'DABUR', 'DLF', 'DMART', 'GAIL', 'GODREJCP', 'HAVELLS', 'HDFCAMC', 'ICICIGI', 'ICICIPRULI', 'IOC', 'INDIGO', 'JUBLFOOD', 'LTIM', 'LUPIN', 'MARICO', 'MINDTREE', 'MUTHOOTFIN', 'NAUKRI', 'NMDC', 'NYKAA', 'PIDILITIND', 'PIIND', 'PEL', 'PGHL', 'PNB', 'SIEMENS', 'SRF', 'SAIL', 'TORNTPHARM', 'MCDOWELL-N', 'VEDL']
+
+allIndices = set(nifty50_stocks +
+                 nifty_bank +
+                 nifty_it +
+                 nifty_fin_service +
+                 nifty_fmcg +
+                 nifty_auto +
+                 nifty_energy +
+                 nifty_metal +
+                 nifty_pharma +
+                 nifty_healthcare +
+                 nifty_realty +
+                 nifty_next_50)
