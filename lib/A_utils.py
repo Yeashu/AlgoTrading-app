@@ -157,6 +157,20 @@ def save_to_csv(df: pd.DataFrame, symbol: str, filepath: str) -> None:
     except Exception as e:
         print(f"Error occurred while saving {symbol} data to a CSV file: {str(e)}")
 
+def save_data_to_csv(data:Dict[str,pd.DataFrame],filepath:str):
+    """
+    Saves multiple stock data to separate CSV files.
+
+    Args:
+        data (Dict[str, pd.DataFrame]): Dictionary containing stock data with symbols as keys.
+        filepath (str): Path to the directory where the CSV files will be saved.
+
+    Returns:
+        None
+    """
+    for symbol, df in data.items():
+        save_to_csv(df,symbol,filepath)
+
 
 def convert_date_string(date_string: str) -> datetime.datetime:
     """
@@ -331,7 +345,7 @@ def get_file_names(directory: str) -> set:
 
     for filename in os.listdir(directory):
         if os.path.isfile(os.path.join(directory, filename)):
-            file_names.add(filename.split('.')[-1])
+            file_names.add(filename.split('.')[0])
 
     return file_names
 

@@ -5,7 +5,7 @@ parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(parent_dir)
 from backtesting import Backtest,Strategy
 from lib.A_utils import save_dict_to_csv, save_to_csv
-from stocksList import nifty50_stocks
+from stocksList import nifty_50
 from startegies import RTBollingerBands,Bhramastra,BhramastraRS
 import pandas as pd
 from multiprocessing import Process, Manager
@@ -193,7 +193,7 @@ if __name__ == '__main__':
     oldStyle = False
     dataDirectories=['/home/yeashu/project/AlgoTrading app/nifty_data_download/Data/Equities_csv/daily/nifty50']
     ResultDirectories=['/home/yeashu/project/AlgoTrading app/backtests/Results']
-    stocks=nifty50_stocks
+    stocks=nifty_50
     leverage=1
     intraday=False
     CalcUnleveragedAlso=True
