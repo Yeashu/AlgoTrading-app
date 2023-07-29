@@ -10,8 +10,7 @@ from py5paisa import FivePaisaClient
 from csv import reader
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
-from lib.A_utils import convert_date_string, RateLimiter
-
+from lib.A_utils import convert_date_string
 
 class FivePaisaWrapper:
     def __init__(
@@ -51,7 +50,6 @@ class FivePaisaWrapper:
         self.client_code = client_code
         self.pin = pin
         self.symbol2scrip: Dict[str, str] = {}
-        self.rate_limiter = RateLimiter(max_calls=apiRate, period=60)
         self.lock = Lock()
 
     def load_conv_dict(self, filepath: str) -> None:
@@ -101,41 +99,30 @@ class FivePaisaWrapper:
             ExchangeSegment (str): The exchange segment code.
             downloadedDataFrames (Dict[str, pd.DataFrame]): A dictionary to store the downloaded data for each symbol.
         """
-        with self.rate_limiter:
-            scrip = self.symbol2scrip[symbol]
-            data = self.client.historical_data(
-                Exch=Exch,
-                ExchangeSegment=ExchangeSegment,
-                ScripCode=scrip,
-                time=interval,
-                From=start,
-                To=end,
-            )
+        scrip = self.symbol2scrip[symbol]
+        data = self.client.historical_data(
+            Exch=Exch,
+            ExchangeSegment=ExchangeSegment,
+            ScripCode=scrip,
+            time=interval,
+            From=start,
+            To=end,
+        )
 
-            if not data.empty:
-                data.set_index("Datetime", inplace=True)
-                data.index = pd.to_datetime(data.index)
-            else:
-                return self._download_data(
-                    symbol,
-                    interval,
-                    start,
-                    end,
-                    Exch,
-                    ExchangeSegment,
-                    downloadedDataFrames,
+        if not data.empty:
+            data.set_index("Datetime", inplace=True)
+            data.index = pd.to_datetime(data.index)
+
+        # Use lock to ensure thread safety when accessing shared resource
+        with self.lock:
+            if symbol in downloadedDataFrames:
+                # If data for this symbol already exists, append new data
+                downloadedDataFrames[symbol] = pd.concat(
+                    [downloadedDataFrames[symbol], data]
                 )
-
-            # Use lock to ensure thread safety when accessing shared resource
-            with self.lock:
-                if symbol in downloadedDataFrames:
-                    # If data for this symbol already exists, append new data
-                    downloadedDataFrames[symbol] = pd.concat(
-                        [downloadedDataFrames[symbol], data]
-                    )
-                else:
-                    # If this is the first batch of data for this symbol, just assign it
-                    downloadedDataFrames[symbol] = data
+            else:
+                # If this is the first batch of data for this symbol, just assign it
+                downloadedDataFrames[symbol] = data
 
     def download(
         self,
