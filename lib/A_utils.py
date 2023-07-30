@@ -157,7 +157,27 @@ def save_to_csv(df: pd.DataFrame, symbol: str, filepath: str) -> None:
     except Exception as e:
         print(f"Error occurred while saving {symbol} data to a CSV file: {str(e)}")
 
-def save_data_to_csv(data:Dict[str,pd.DataFrame],filepath:str):
+def save_to_parquet(df: pd.DataFrame, symbol: str, filepath: str) -> None:
+    """
+    Saves stock data to a Parquet file.
+
+    Args:
+        df (pandas.DataFrame): Stock data.
+        symbol (str): Stock symbol or ticker.
+        filepath (str): Path to the directory where the Parquet file will be saved.
+
+    Returns:
+        None
+    """
+    try:
+        os.makedirs(filepath, exist_ok=True)  # Create the directory if it doesn't exist
+        filename = os.path.join(filepath, f'{symbol}.parquet')
+        df.to_parquet(filename, index=True)
+        print(f"{symbol} data saved to {filename}.")
+    except Exception as e:
+        print(f"Error occurred while saving {symbol} data to a Parquet file: {str(e)}")
+
+def save_data_to_csv(data:Dict[str,pd.DataFrame],filepath:str, to_parquet:bool = False,suffix:str = ''):
     """
     Saves multiple stock data to separate CSV files.
 
@@ -168,8 +188,13 @@ def save_data_to_csv(data:Dict[str,pd.DataFrame],filepath:str):
     Returns:
         None
     """
+    if to_parquet:
+        save = save_to_parquet
+    else:
+        save = save_to_csv
+
     for symbol, df in data.items():
-        save_to_csv(df,symbol,filepath)
+        save(df,symbol+suffix,filepath)
 
 
 def convert_date_string(date_string: str) -> datetime.datetime:
@@ -214,7 +239,7 @@ def clean_csv_files(directory: str) -> None:
         data.set_index('Datetime', inplace=True)
 
         # Remove duplicate entries
-        data = data.loc[~data.index.duplicated(keep='first')]
+        data = data.drop_duplicates()
 
         # Save the cleaned data back to the file
         data.to_csv(file)
@@ -266,7 +291,7 @@ def merge_and_clean_csv_files(directory0: str, directory2: str) -> None:
     print(f"Processed {len(csv_files0)} CSV files.")
 
 
-def find_missing_intervals(df: pd.DataFrame,startTime:str,endTime:str,freq:str='15T') -> pd.DatetimeIndex:
+def find_missing_intervals(df: pd.DataFrame, startTime:str, endTime:str, holidays: list, freq:str='15T') -> pd.DatetimeIndex:
     """
     Find missing intervals in a DataFrame.
 
@@ -274,6 +299,7 @@ def find_missing_intervals(df: pd.DataFrame,startTime:str,endTime:str,freq:str='
         df (pandas.DataFrame): DataFrame containing the data.
         startTime (str): Start time of the trading hours (HH:MM format).
         endTime (str): End time of the trading hours (HH:MM format).
+        holidays (list): List of holidays when the market is closed.
         freq (str, optional): Frequency of intervals (default='15T').
 
     Returns:
@@ -282,13 +308,16 @@ def find_missing_intervals(df: pd.DataFrame,startTime:str,endTime:str,freq:str='
     # Ensure the datetime column is the index and is in datetime format
     df.index = pd.to_datetime(df.index)
 
-    # Remove duplicate entries
-    df = df.loc[~df.index.duplicated(keep='first')]
+    # Convert holidays to DatetimeIndex and normalize
+    holidays = pd.DatetimeIndex(holidays).normalize()
 
     # Create a date range for trading hours on business days between the start and end of the dataset
     start = df.index.min().normalize()
     end = df.index.max().normalize()
     business_days = pd.date_range(start=start, end=end, freq=BDay())
+
+    # Exclude holidays
+    business_days = business_days[~business_days.isin(holidays)]
 
     trading_hours = pd.date_range(start=startTime, end=endTime, freq=freq)
     trading_times = trading_hours.time
@@ -301,34 +330,23 @@ def find_missing_intervals(df: pd.DataFrame,startTime:str,endTime:str,freq:str='
 
     # Find the missing entries
     missing_entries = expected_index.difference(df.index)
-
-    # Remove entries where the entire trading day is missing
-    missing_days = pd.to_datetime([time.normalize() for time in missing_entries]).unique()
-    for day in missing_days:
-        day_entries = [entry for entry in missing_entries if entry.normalize() == day]
-        if len(day_entries) == len(trading_times):
-            missing_entries = missing_entries.delete([missing_entries.get_loc(entry) for entry in day_entries])
-
     return missing_entries
 
 
-def get_missing_dates(missing_entries: pd.DatetimeIndex, by_month: Optional[bool] = False) -> pd.DatetimeIndex:
+
+def get_missing_dates(missing_entries: pd.DatetimeIndex, num_days: Optional[int] = 1) -> pd.DatetimeIndex:
     """
     Get the missing dates from the missing entries.
 
     Args:
         missing_entries (pandas.DatetimeIndex): DatetimeIndex of missing entries.
-        by_month (bool, optional): If True, return missing dates by month (default=False).
+        num_days (int, optional): Number of days to consider (default=1).
 
     Returns:
         pandas.DatetimeIndex: DatetimeIndex of missing dates.
     """
     missing_dates = pd.to_datetime([time.normalize() for time in missing_entries]).unique()
-    
-    if by_month:
-        missing_dates = missing_dates.to_period('M').unique().to_timestamp()
-    
-    return missing_dates
+    return pd.date_range(start=missing_dates.min(), end=missing_dates.max(), freq=f'{num_days}D')
 
 
 def get_file_names(directory: str) -> set:
@@ -349,7 +367,8 @@ def get_file_names(directory: str) -> set:
 
     return file_names
 
-def download_missing_data(dfs: List[pd.DataFrame], missing_dates: List[pd.DatetimeIndex], symbols: List[str],app, interval: str = '15m') -> Dict[str, pd.DataFrame]:
+def download_missing_data(dfs: List[pd.DataFrame], missing_dates: List[pd.DatetimeIndex],
+                          symbols: List[str], app, interval: str = '15m', num_days: int = 1) -> Dict[str, pd.DataFrame]:
     """
     Download missing data for the given missing dates by symbol and concatenate with the existing DataFrames.
 
@@ -357,8 +376,9 @@ def download_missing_data(dfs: List[pd.DataFrame], missing_dates: List[pd.Dateti
         dfs (List[pd.DataFrame]): List of existing DataFrames.
         missing_dates (List[pd.DatetimeIndex]): List of DatetimeIndex of missing dates for each symbol.
         symbols (List[str]): List of symbols.
-        app (FivePaisaWrapper) : For downloading data
+        app (FivePaisaWrapper): For downloading data
         interval (str, optional): Time interval for the download (default: '15m').
+        num_days (int, optional): Number of days to consider for each missing date (default: 1).
 
     Returns:
         Dict[str, pd.DataFrame]: Dictionary containing the downloaded data for each symbol.
@@ -372,8 +392,8 @@ def download_missing_data(dfs: List[pd.DataFrame], missing_dates: List[pd.Dateti
 
             for date in missing_dates[i]:
                 start = date.strftime('%Y-%m-%d')
-                end = (date + pd.offsets.MonthEnd(0)).strftime('%Y-%m-%d')
-                future = executor.submit(app._download_data,symbol, interval, start, end, 'N','C', downloaded_data_frames)
+                end = (date + pd.DateOffset(days=num_days - 1)).strftime('%Y-%m-%d')
+                future = executor.submit(app._download_data, symbol, interval, start, end, 'N', 'C', downloaded_data_frames)
                 symbol_futures[future] = symbol
 
         with tqdm(total=len(symbol_futures), ncols=80, bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} - {desc}") as pbar:
@@ -389,3 +409,31 @@ def download_missing_data(dfs: List[pd.DataFrame], missing_dates: List[pd.Dateti
         df.drop_duplicates(inplace=True)
 
     return downloaded_data_frames
+
+def create_scrip_dictionaries(csv_location):
+    """
+    This function takes the location of a CSV file containing security details as input and
+    returns two dictionaries.
+
+    1. cashScrip: Maps symbols to scrip codes for the cash market.
+    2. stockScrip: Maps symbols to scrip codes for stocks (contains stock that allow intraday)
+
+    Parameters:
+    csv_location (str): The location of the CSV file.
+
+    Returns:
+    tuple: A tuple containing two dictionaries (cashScrip, stockScrip).
+    """
+    df = pd.read_csv(csv_location)
+
+    # Filter for cash market
+    cash_market_df = df[(df['ExchType'] == 'C') & (df['Series'] == 'EQ') | (df['Series'] == 'BE') ]
+
+    # Filter for stocks (excluding NAV and other non-stock entities)
+    stock_df = df[(df['ExchType'] == 'C') & (df['Series'] == 'EQ')]
+
+    # Generate the dictionaries
+    cashScrip = dict(zip(cash_market_df['Name'], cash_market_df['Scripcode']))
+    stockScrip = dict(zip(stock_df['Name'], stock_df['Scripcode']))
+
+    return cashScrip, stockScrip
