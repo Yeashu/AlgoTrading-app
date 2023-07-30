@@ -23,7 +23,6 @@ class FivePaisaWrapper:
         ENCRYPTION_KEY: str,
         client_code: int,
         pin: int,
-        apiRate: int = 100,
     ) -> None:
         """
         Initializes the FivePaisaWrapper object with the provided credentials and client information.
@@ -99,7 +98,11 @@ class FivePaisaWrapper:
             ExchangeSegment (str): The exchange segment code.
             downloadedDataFrames (Dict[str, pd.DataFrame]): A dictionary to store the downloaded data for each symbol.
         """
-        scrip = self.symbol2scrip[symbol]
+        try:
+            scrip = self.symbol2scrip[symbol]
+        except KeyError:
+            print(f'{symbol} does not exist in the Scrip Dict')
+            return
         data = self.client.historical_data(
             Exch=Exch,
             ExchangeSegment=ExchangeSegment,
