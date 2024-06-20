@@ -1,6 +1,6 @@
 # AlgoTrading-app 
 
-AlgoTrading-app is a Python-based application designed to streamline the entire trading process, from data collection for backtesting, strategy development, backtesting, strategy optimization to live execution.
+AlgoTrading-app is a Python-based application designed to streamline the entire trading process, from stock market data collection, strategy development, backtesting, strategy optimization to live execution.
 
 ## Key Features
 
@@ -45,7 +45,7 @@ While live execution of trading strategies is not currently implemented in AlgoT
 1. Clone the main repository (AlgoTrading-app) and initialize the submodules:
 
     ```sh
-    git clone https://github.com/Yeashu/AlgoTrading-app.git
+    git clone --recurse-submodules https://github.com/Yeashu/AlgoTrading-app.git
     cd AlgoTrading-app
     ```
 
