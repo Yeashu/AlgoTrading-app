@@ -133,3 +133,26 @@ To run a backtest using the `AlgoTrading-app`, follow these steps:
 
 \* 5 paisa api key is required for `FivePaisaWrapper`
 
+# Acknowledgments and Credits
+## Libraries and APIs Used
+
+  - **backtesting.py**: A Python library by Kernc for backtesting trading strategies. https://github.com/kernc/backtesting.py
+
+  - **pandas_ta**: A powerful Python library for technical analysis in pandas. https://github.com/twopirllc/pandas-ta
+    
+  - **py5paisa**: Python SDK for 5paisa APIs. https://github.com/OpenApi-5p/py5paisa. 
+
+  - **yfinance**: Python library to fetch historical market data from Yahoo Finance. https://github.com/ranaroussi/yfinance
+
+## Contributors
+
+  **Yeashu**: developer and maintainer of AlgoTrading-app.
+
+## Special Thanks
+
+  **Open-source Community**: Gratitude to all developers and contributors who create and maintain open-source projects, providing valuable resources and tools for the developer community worldwide.
+
+# License
+
+This project is licensed under the MIT License.
+
