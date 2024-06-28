@@ -28,17 +28,20 @@ AlgoTrading-app is a Python-based application designed to streamline the entire 
 
 ## How It Works
 
-### Backtesting with Multiprocessing
+- ### Backtesting with Multiprocessing
 
-Our backtesting script utilizes the power of multiprocessing to run backtests for multiple stocks in parallel. This not only speeds up the backtesting process significantly but also allows for efficient utilization of system resources, making it ideal for testing multiple strategies across a wide range of stocks. We leverage the `backtesting.py` library by Kernc for conducting backtests and strategy optimization, ensuring robust and accurate results.
+   Our backtesting script utilizes the power of multiprocessing to run backtests for multiple stocks in parallel. This not only speeds up the backtesting process significantly but also allows for efficient utilization of system resources, making it ideal for testing multiple strategies across a wide range of stocks. We leverage the `backtesting.py` library by Kernc for conducting backtests and strategy optimization, ensuring robust and accurate results.
 
-### Data Integration with FivePaisaWrapper
+- ### Data Integration with FivePaisaWrapper
 
-In addition to fetching historical stock data from Yahoo Finance using the `yfinance` library, AlgoTrading-app offers the option to use our custom `FivePaisaWrapper`. This wrapper utilizes multithreading to download historical and intraday stock data concurrently, making it faster than traditional methods. Compared to 5paisa's own API SDK `py5paisa`, our wrapper is up to **20** times faster during bulk download of stock data.
+  In addition to fetching historical stock data from Yahoo Finance using the `yfinance` library, AlgoTrading-app offers the option to use our custom `FivePaisaWrapper`. This wrapper utilizes multithreading to download historical and intraday stock data concurrently, making it faster than traditional methods. Compared to 5paisa's own API SDK `py5paisa`, our wrapper is up to **20** times faster during bulk download of stock data.
 
-### Live Execution (Work in Progress)
+- ### Live Execution (Work in Progress)
 
-While live execution of trading strategies is not currently implemented in AlgoTrading-app, it's on our to-do list.
+  While live execution of trading strategies is not currently implemented in AlgoTrading-app, it's on my to-do list.
+
+
+# Usage Instructions
 
 ## Setup
 
@@ -61,7 +64,72 @@ While live execution of trading strategies is not currently implemented in AlgoT
    conda activate AlgoTrading
    ```
 
+## Running a Backtest
 
+To run a backtest using the `AlgoTrading-app`, follow these steps:
+
+1. **Configure Your Strategy**:
+   Open the `backtests/strategies.py` file and define your trading strategy. For example, you might set up a simple moving average crossover strategy.
+
+   ```python
+   from backtesting import Strategy
+   from backtesting.lib import crossover
+   from backtesting.test import SMA
+
+   class SmaCross(Strategy):
+       def init(self):
+           self.sma1 = self.I(SMA, self.data.Close, 10)
+           self.sma2 = self.I(SMA, self.data.Close, 20)
+
+       def next(self):
+           if crossover(self.sma1, self.sma2):
+               self.buy()
+           elif crossover(self.sma2, self.sma1):
+               self.sell()
+   ```
+2. **Prepare Your Data**:
+   Use the `yfinance` library to fetch historical stock data. You can also use `FivePaisaWrapper` for data.
+
+   ```python
+    import yfinance as yf
+ 
+    # Define the list of stocks to backtest
+    stocks = ['AAPL', 'MSFT', 'GOOGL']
+
+    # Fetch data for each stock
+    data_directory = '/path/to/data'
+    for stock in stocks:
+        data = yf.download(stock, start='2020-01-01', end='2021-01-01')
+        data.to_csv(f'{data_directory}/{stock}.csv')
+   ```
+   Replace /path/to/data with the directory path where you want to save your stock data files.
+
+3. **Run the Backtest:**
+   Use the `backtests/backtester.py` script to execute your backtest for the fetched data. The script is designed to run backtests for multiple stocks using multiprocessing.
+
+   ```python
+   from backtests.strategies import SmaCross
+   from backtests.backtester import mBacktest
+
+   mBacktest(
+       strategy=SmaCross,
+       stocks=stocks,
+       dataDirectory=data_directory,
+       cash=10000,
+       intraday=False,
+       leverage=1,
+       save=True,
+       commission=0.002,
+       savePlots=True,
+       openPlots=False,
+       oldStyle=False,
+       saveDirectory='BacktestResult',
+       verbose=True
+   )
+   ```
+   The results of backtests will be stored in the directory specified by the saveDirectory parameter in the mBacktest function.
+   Feel free to read the function (mBacktest) documentation for more info (It is well written ;) .
+   
 
 \* 5 paisa api key is required for `FivePaisaWrapper`
 
