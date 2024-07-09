@@ -16,8 +16,6 @@ AlgoTrading-app is a Python-based application designed to streamline the entire 
   
 - 🚀 **Concurrent Data Download**: Leverage multithreading capabilities to download historical and intraday stock data concurrently, streamlining your data acquisition process. This is done through our `FivePaisaWrapper` that uses multithreading to speed up the download by **20x** compared to using `py5paisa`.
 
-- ⏱️ **Rate Limiting**: Respect API rate limits with rate-limiting mechanism, ensuring smooth and uninterrupted data retrieval.
-
 # TO-DO
   
 - 🔄 **Live Execution**: Seamlessly transition from backtesting to live trading, executing your proven strategies in real-time market conditions.
