@@ -4,3 +4,4 @@ py5paisa
 yfinance
 pandas
 numpy
+tqdm
